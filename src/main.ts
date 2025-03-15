@@ -10,7 +10,7 @@ import Anthropic from "@anthropic-ai/sdk";
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
 const AI_PROVIDER: string = core.getInput("AI_PROVIDER") || "openai"; // Default to OpenAI if not specified
 const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
-const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
+const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL") || "o3-mini";
 const ANTHROPIC_API_KEY: string = core.getInput("ANTHROPIC_API_KEY");
 const ANTHROPIC_API_MODEL: string = core.getInput("ANTHROPIC_API_MODEL") || "claude-3-7-sonnet-20250219"; // Latest model
 const EXCLUDE_PATTERNS: string[] = core
