@@ -4,10 +4,15 @@ import OpenAI from "openai";
 import { Octokit } from "@octokit/rest";
 import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
+import Anthropic from "@anthropic-ai/sdk";
 
+// Constants for configuration
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
+const AI_PROVIDER: string = core.getInput("AI_PROVIDER") || "openai"; // Default to OpenAI if not specified
 const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
+const ANTHROPIC_API_KEY: string = core.getInput("ANTHROPIC_API_KEY");
+const ANTHROPIC_API_MODEL: string = core.getInput("ANTHROPIC_API_MODEL") || "claude-3-7-sonnet-20250219"; // Latest model
 const EXCLUDE_PATTERNS: string[] = core
   .getInput("exclude")
   .split(",")
@@ -19,7 +24,11 @@ const octokit = new Octokit({ auth: GITHUB_TOKEN });
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 });
+const anthropic = new Anthropic({
+  apiKey: ANTHROPIC_API_KEY,
+});
 
+// Type definitions
 interface PRDetails {
   owner: string;
   repo: string;
@@ -173,9 +182,25 @@ ${chunk.changes
 }
 
 /**
- * Gets AI response for a given prompt
+ * Gets AI response for a given prompt using the configured AI provider
  */
 async function getAIResponse(prompt: string): Promise<AIReviewResponse[] | null> {
+  try {
+    if (AI_PROVIDER.toLowerCase() === "anthropic") {
+      return await getAnthropicResponse(prompt);
+    } else {
+      return await getOpenAIResponse(prompt);
+    }
+  } catch (error) {
+    core.error(`Error getting AI response: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+/**
+ * Gets response from OpenAI API
+ */
+async function getOpenAIResponse(prompt: string): Promise<AIReviewResponse[] | null> {
   const queryConfig = {
     model: OPENAI_API_MODEL,
     temperature: 0.2,
@@ -213,11 +238,71 @@ async function getAIResponse(prompt: string): Promise<AIReviewResponse[] | null>
       const parsedResponse = JSON.parse(content);
       return parsedResponse.reviews || [];
     } catch (parseError) {
-      core.warning(`Failed to parse AI response as JSON: ${content}`);
+      core.warning(`Failed to parse OpenAI response as JSON: ${content}`);
       return null;
     }
   } catch (error) {
     core.error(`Error calling OpenAI API: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+/**
+ * Gets response from Anthropic API
+ */
+async function getAnthropicResponse(prompt: string): Promise<AIReviewResponse[] | null> {
+  try {
+    core.debug(`Sending request to Anthropic API with model: ${ANTHROPIC_API_MODEL}`);
+    
+    const response = await anthropic.messages.create({
+      model: ANTHROPIC_API_MODEL,
+      max_tokens: 1024,
+      temperature: 0.2,
+      system: "You are a helpful code review assistant that provides feedback in JSON format.",
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
+
+    // Process the content blocks from the response
+    let textContent = "";
+    
+    // The content property is an array of content blocks
+    if (response.content && Array.isArray(response.content)) {
+      // Find text blocks and concatenate their content
+      for (const block of response.content) {
+        if (block.type === 'text' && 'text' in block) {
+          textContent += block.text;
+        }
+      }
+    }
+    
+    if (!textContent) {
+      core.warning("Received empty or invalid response from Anthropic API");
+      return null;
+    }
+    
+    try {
+      // Extract JSON from the response - Anthropic might wrap the JSON in markdown code blocks
+      let jsonContent = textContent.trim();
+      
+      // Check if the content is wrapped in a code block and extract it
+      const jsonMatch = jsonContent.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (jsonMatch && jsonMatch[1]) {
+        jsonContent = jsonMatch[1].trim();
+      }
+      
+      const parsedResponse = JSON.parse(jsonContent);
+      return parsedResponse.reviews || [];
+    } catch (parseError) {
+      core.warning(`Failed to parse Anthropic response as JSON: ${textContent}`);
+      return null;
+    }
+  } catch (error) {
+    core.error(`Error calling Anthropic API: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
@@ -345,11 +430,32 @@ function filterFiles(parsedDiff: File[]): File[] {
 }
 
 /**
+ * Validates the configuration based on the selected AI provider
+ */
+function validateConfig(): void {
+  if (AI_PROVIDER.toLowerCase() === "anthropic") {
+    if (!ANTHROPIC_API_KEY) {
+      throw new Error("ANTHROPIC_API_KEY is required when using Anthropic as the AI provider");
+    }
+    core.info(`Using Anthropic as AI provider with model: ${ANTHROPIC_API_MODEL}`);
+  } else {
+    // Default to OpenAI
+    if (!OPENAI_API_KEY) {
+      throw new Error("OPENAI_API_KEY is required when using OpenAI as the AI provider");
+    }
+    core.info(`Using OpenAI as AI provider with model: ${OPENAI_API_MODEL}`);
+  }
+}
+
+/**
  * Main function
  */
 async function main() {
   try {
     core.info("Starting AI code review");
+    
+    // Validate configuration
+    validateConfig();
     
     // Get PR details
     const prDetails = await getPRDetails();
