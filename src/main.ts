@@ -201,20 +201,28 @@ async function getAIResponse(prompt: string): Promise<AIReviewResponse[] | null>
  * Gets response from OpenAI API
  */
 async function getOpenAIResponse(prompt: string): Promise<AIReviewResponse[] | null> {
-  const queryConfig = {
+  // Base configuration for the API request
+  const baseConfig = {
     model: OPENAI_API_MODEL,
     temperature: 0.2,
-    max_tokens: 700,
     top_p: 1,
     frequency_penalty: 0,
     presence_penalty: 0,
   };
 
+  // Add token limit based on model type
+  // For o1/o3 series models, use max_completion_tokens
+  // For older models, use max_tokens
+  const tokenConfig = OPENAI_API_MODEL.startsWith('o') 
+    ? { max_completion_tokens: 1500 }
+    : { max_tokens: 1500 };
+
   try {
     core.debug(`Sending request to OpenAI API with model: ${OPENAI_API_MODEL}`);
     
     const response = await openai.chat.completions.create({
-      ...queryConfig,
+      ...baseConfig,
+      ...tokenConfig,
       // return JSON if the model supports it:
       ...(OPENAI_API_MODEL === "gpt-4-1106-preview"
         ? { response_format: { type: "json_object" } }
