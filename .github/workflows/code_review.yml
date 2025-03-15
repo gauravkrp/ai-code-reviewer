@@ -12,7 +12,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
       - name: AI Code Reviewer
-        uses: freeedcom/ai-codereviewer@main
+        uses: gauravkrp/ai-codereviewer@main
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Choose which AI provider to use (openai or anthropic)
