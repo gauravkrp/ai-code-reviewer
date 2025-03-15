@@ -1,4 +1,4 @@
-name: "AI Code Review Action"
+name: "AI Code & PR Review"
 description: "Perform code reviews and comment on diffs using OpenAI or Anthropic API."
 inputs:
   GITHUB_TOKEN:
