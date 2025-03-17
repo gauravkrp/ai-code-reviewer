@@ -460,7 +460,7 @@ function validateConfig(): void {
 /**
  * Main function
  */
-async function main() {
+export async function main() {
   try {
     core.info("Starting AI code review");
     
@@ -508,8 +508,10 @@ async function main() {
   }
 }
 
-// Run the main function
-main().catch((error) => {
-  core.setFailed(`Unhandled error: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+// Only run the main function if this file is being run directly
+if (require.main === module) {
+  main().catch((error) => {
+    core.setFailed(`Unhandled error: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}

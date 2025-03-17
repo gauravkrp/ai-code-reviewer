@@ -42,6 +42,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.main = void 0;
 const fs_1 = __nccwpck_require__(7147);
 const core = __importStar(__nccwpck_require__(2186));
 const openai_1 = __importDefault(__nccwpck_require__(47));
@@ -462,11 +463,14 @@ function main() {
         }
     });
 }
-// Run the main function
-main().catch((error) => {
-    core.setFailed(`Unhandled error: ${error instanceof Error ? error.message : String(error)}`);
-    process.exit(1);
-});
+exports.main = main;
+// Only run the main function if this file is being run directly
+if (require.main === require.cache[eval('__filename')]) {
+    main().catch((error) => {
+        core.setFailed(`Unhandled error: ${error instanceof Error ? error.message : String(error)}`);
+        process.exit(1);
+    });
+}
 
 
 /***/ }),

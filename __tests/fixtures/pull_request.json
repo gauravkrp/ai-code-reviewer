@@ -1,0 +1,21 @@
+{
+  "action": "opened",
+  "pull_request": {
+    "number": 1,
+    "title": "Test PR",
+    "body": "This is a test PR for local testing",
+    "base": {
+      "sha": "base-sha"
+    },
+    "head": {
+      "sha": "head-sha"
+    }
+  },
+  "repository": {
+    "name": "test-repo",
+    "owner": {
+      "login": "test-owner"
+    }
+  },
+  "number": 1
+}
