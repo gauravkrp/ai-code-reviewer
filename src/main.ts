@@ -40,7 +40,16 @@ interface PRDetails {
 interface ReviewComment {
   body: string;
   path: string;
-  line: number;
+  position: number;  // Required: The position in the diff where you want to add a review comment
+  line?: number;     // Optional: The line of the blob in the pull request diff that the comment applies to
+  side?: 'RIGHT' | 'LEFT';  // Optional: The side of the diff that the comment applies to
+  commit_id?: string;  // Optional: The SHA of the commit needing to be reviewed
+  line_number?: number;  // Optional: The line number in the file to comment on
+  start_line?: number;  // Optional: The line of the blob in the pull request diff that the comment applies to
+  start_side?: 'RIGHT' | 'LEFT';  // Optional: The side of the diff that the comment applies to
+  original_line?: number;  // Optional: The line of the blob in the pull request diff that the comment applies to
+  original_start_line?: number;  // Optional: The line of the blob in the pull request diff that the comment applies to
+  original_commit_id?: string;  // Optional: The SHA of the commit needing to be reviewed
 }
 
 interface AIReviewResponse {
@@ -330,11 +339,48 @@ function createComment(
     return [];
   }
   
-  return aiResponses.map((aiResponse) => ({
-    body: aiResponse.reviewComment,
-    path: file.to!,
-    line: Number(aiResponse.lineNumber),
-  })).filter(comment => !isNaN(comment.line)); // Filter out comments with invalid line numbers
+  return aiResponses.map((aiResponse) => {
+    const lineNumber = Number(aiResponse.lineNumber);
+    if (isNaN(lineNumber)) {
+      core.warning(`Invalid line number in AI response: ${aiResponse.lineNumber}`);
+      return null;
+    }
+
+    // Find the change that corresponds to this line number
+    const change = chunk.changes.find(c => {
+      // @ts-expect-error - ln and ln2 exist where needed
+      return c.ln === lineNumber || c.ln2 === lineNumber;
+    });
+
+    if (!change) {
+      core.warning(`No matching change found for line number ${lineNumber}`);
+      return null;
+    }
+
+    // Calculate position in the diff
+    // Position is the line number in the diff where the comment should be placed
+    // This is typically the line number in the new file (ln2) for additions
+    // or the line number in the old file (ln) for deletions
+    // @ts-expect-error - ln and ln2 exist where needed
+    const position = change.ln2 || change.ln;
+
+    const comment: ReviewComment = {
+      body: aiResponse.reviewComment,
+      path: file.to!,
+      position,  // Required field
+      line: lineNumber,  // The line number in the file
+      side: 'RIGHT' as const,  // Default to right side (new code)
+      // @ts-expect-error - ln and ln2 exist where needed
+      original_line: change.ln || change.ln2,
+      // @ts-expect-error - ln and ln2 exist where needed
+      line_number: change.ln2 || change.ln,
+      start_line: chunk.oldStart,
+      original_start_line: chunk.oldStart,
+      original_commit_id: chunk.oldLines ? chunk.oldLines.toString() : undefined
+    };
+
+    return comment;
+  }).filter((comment): comment is ReviewComment => comment !== null);
 }
 
 /**
