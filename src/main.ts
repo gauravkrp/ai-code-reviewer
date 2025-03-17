@@ -211,8 +211,8 @@ async function getOpenAIResponse(prompt: string): Promise<AIReviewResponse[] | n
   };
 
   // Add token limit based on model type
-  // For o1/o3 series models, use max_completion_tokens
-  // For older models, use max_tokens
+  // For newer models (o1/o3 series), use max_completion_tokens
+  // For older models (gpt-4), use max_tokens
   const tokenConfig = OPENAI_API_MODEL.startsWith('o') 
     ? { max_completion_tokens: 1500 }
     : { max_tokens: 1500 };
@@ -223,8 +223,8 @@ async function getOpenAIResponse(prompt: string): Promise<AIReviewResponse[] | n
     const response = await openai.chat.completions.create({
       ...baseConfig,
       ...tokenConfig,
-      // return JSON if the model supports it:
-      ...(OPENAI_API_MODEL === "gpt-4-1106-preview"
+      // return JSON if the model supports it (GPT-4-1106-preview and newer)
+      ...(OPENAI_API_MODEL.startsWith('gpt-4-1106-preview') || OPENAI_API_MODEL.startsWith('o')
         ? { response_format: { type: "json_object" } }
         : {}),
       messages: [

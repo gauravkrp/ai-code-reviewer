@@ -14,7 +14,7 @@ inputs:
   OPENAI_API_MODEL:
     description: "OpenAI API model."
     required: false
-    default: "gpt-4"
+    default: "o3-mini"
   ANTHROPIC_API_KEY:
     description: "Anthropic API key for Claude."
     required: false
