@@ -213,22 +213,19 @@ function getOpenAIResponse(prompt) {
         // Base configuration for the API request
         const baseConfig = {
             model: OPENAI_API_MODEL,
-            temperature: 0.2,
-            top_p: 1,
-            frequency_penalty: 0,
-            presence_penalty: 0,
         };
-        // Add token limit based on model type
-        // For newer models (o1/o3 series), use max_completion_tokens
-        // For older models (gpt-4), use max_tokens
-        const tokenConfig = OPENAI_API_MODEL.startsWith('o')
-            ? { max_completion_tokens: 1500 }
-            : { max_tokens: 1500 };
+        // Add model-specific parameters
+        const modelConfig = OPENAI_API_MODEL.startsWith('o')
+            ? {
+                max_completion_tokens: 1500,
+                response_format: { type: "json_object" }
+            }
+            : Object.assign({ temperature: 0.2, top_p: 1, frequency_penalty: 0, presence_penalty: 0, max_tokens: 1500 }, (OPENAI_API_MODEL === "gpt-4-1106-preview"
+                ? { response_format: { type: "json_object" } }
+                : {}));
         try {
             core.debug(`Sending request to OpenAI API with model: ${OPENAI_API_MODEL}`);
-            const response = yield openai.chat.completions.create(Object.assign(Object.assign(Object.assign(Object.assign({}, baseConfig), tokenConfig), (OPENAI_API_MODEL.startsWith('gpt-4-1106-preview') || OPENAI_API_MODEL.startsWith('o')
-                ? { response_format: { type: "json_object" } }
-                : {})), { messages: [
+            const response = yield openai.chat.completions.create(Object.assign(Object.assign(Object.assign({}, baseConfig), modelConfig), { messages: [
                     {
                         role: "system",
                         content: prompt,

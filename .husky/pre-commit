@@ -1,1 +1,5 @@
-yarn pre-commit 
+# Run build and package commands
+yarn pre-commit
+
+# Add generated files to staging
+git add .
