@@ -9,7 +9,9 @@
     "build": "tsc",
     "package": "ncc build --source-map --license licenses.txt",
     "format": "prettier --write .",
-    "lint": "prettier --check ."
+    "lint": "prettier --check .",
+    "postinstall": "husky",
+    "pre-commit": "npm run build && npm run package"
   },
   "dependencies": {
     "@actions/core": "^1.10.0",
@@ -23,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^18.15.5",
     "@vercel/ncc": "^0.36.1",
+    "husky": "^9.0.11",
     "prettier": "^2.8.6",
     "typescript": "^5.0.2"
   }
