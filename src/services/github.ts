@@ -61,20 +61,65 @@ export async function getDiff(
   pull_number: number
 ): Promise<string> {
   try {
-    const response = await withRetry(
-      () => octokit.pulls.get({
-        owner,
-        repo,
-        pull_number,
-        mediaType: { format: "diff" },
-      }),
-      MAX_RETRIES,
-      RETRY_DELAY,
-      "github-api-get-diff"
+    if (!process.env.GITHUB_EVENT_PATH) {
+      throw new Error("GITHUB_EVENT_PATH environment variable is not set");
+    }
+
+    const eventData = JSON.parse(
+      readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")
     );
-    
-    // @ts-expect-error - response.data is a string when mediaType.format is "diff"
-    return response.data;
+
+    // Log the event type for debugging
+    core.debug(`Processing GitHub event type: ${eventData.action || 'unknown'}`);
+
+    // If this is a pull request event, get the diff from the event payload
+    if (eventData.pull_request) {
+      core.info("Processing pull request event - getting full PR diff");
+      const response = await withRetry(
+        () => octokit.pulls.get({
+          owner,
+          repo,
+          pull_number,
+          mediaType: { format: "diff" },
+        }),
+        MAX_RETRIES,
+        RETRY_DELAY,
+        "github-api-get-diff"
+      );
+      
+      // @ts-expect-error - response.data is a string when mediaType.format is "diff"
+      return response.data;
+    }
+
+    // For other events (like push), get the diff between the current and previous commit
+    if (eventData.commits && eventData.commits.length > 0) {
+      core.info("Processing push event - getting diff between commits");
+      const currentCommit = eventData.after;
+      const previousCommit = eventData.before;
+      
+      if (!currentCommit || !previousCommit) {
+        throw new Error("Missing commit information in event payload");
+      }
+
+      core.debug(`Comparing commits: ${previousCommit} -> ${currentCommit}`);
+      const response = await withRetry(
+        () => octokit.repos.compareCommits({
+          owner,
+          repo,
+          base: previousCommit,
+          head: currentCommit,
+          mediaType: { format: "diff" },
+        }),
+        MAX_RETRIES,
+        RETRY_DELAY,
+        "github-api-compare-commits"
+      );
+      
+      // @ts-expect-error - response.data is a string when mediaType.format is "diff"
+      return response.data;
+    }
+
+    throw new Error("Unsupported event type or missing commit information");
   } catch (error) {
     core.error(`Failed to get diff: ${error instanceof Error ? error.message : String(error)}`);
     throw error;

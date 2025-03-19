@@ -126,7 +126,7 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
       const currentTotalLines = currentChunk.newLines + currentChunk.oldLines;
       const nextTotalLines = chunk.newLines + chunk.oldLines;
       
-      if (currentTotalLines < 100 && nextTotalLines < 100) {
+      if (currentTotalLines < 200 && nextTotalLines < 200) {
         // Merge chunks
         currentChunk.newLines += chunk.newLines;
         currentChunk.oldLines += chunk.oldLines;

@@ -248,7 +248,7 @@ function processFile(file, prDetails) {
                 // If the current chunk is small and the next chunk is small, merge them
                 const currentTotalLines = currentChunk.newLines + currentChunk.oldLines;
                 const nextTotalLines = chunk.newLines + chunk.oldLines;
-                if (currentTotalLines < 100 && nextTotalLines < 100) {
+                if (currentTotalLines < 200 && nextTotalLines < 200) {
                     // Merge chunks
                     currentChunk.newLines += chunk.newLines;
                     currentChunk.oldLines += chunk.oldLines;
@@ -949,14 +949,44 @@ exports.getPRDetails = getPRDetails;
 function getDiff(owner, repo, pull_number) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const response = yield (0, retry_1.withRetry)(() => octokit.pulls.get({
-                owner,
-                repo,
-                pull_number,
-                mediaType: { format: "diff" },
-            }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-diff");
-            // @ts-expect-error - response.data is a string when mediaType.format is "diff"
-            return response.data;
+            if (!process.env.GITHUB_EVENT_PATH) {
+                throw new Error("GITHUB_EVENT_PATH environment variable is not set");
+            }
+            const eventData = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH, "utf8"));
+            // Log the event type for debugging
+            core.debug(`Processing GitHub event type: ${eventData.action || 'unknown'}`);
+            // If this is a pull request event, get the diff from the event payload
+            if (eventData.pull_request) {
+                core.info("Processing pull request event - getting full PR diff");
+                const response = yield (0, retry_1.withRetry)(() => octokit.pulls.get({
+                    owner,
+                    repo,
+                    pull_number,
+                    mediaType: { format: "diff" },
+                }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-diff");
+                // @ts-expect-error - response.data is a string when mediaType.format is "diff"
+                return response.data;
+            }
+            // For other events (like push), get the diff between the current and previous commit
+            if (eventData.commits && eventData.commits.length > 0) {
+                core.info("Processing push event - getting diff between commits");
+                const currentCommit = eventData.after;
+                const previousCommit = eventData.before;
+                if (!currentCommit || !previousCommit) {
+                    throw new Error("Missing commit information in event payload");
+                }
+                core.debug(`Comparing commits: ${previousCommit} -> ${currentCommit}`);
+                const response = yield (0, retry_1.withRetry)(() => octokit.repos.compareCommits({
+                    owner,
+                    repo,
+                    base: previousCommit,
+                    head: currentCommit,
+                    mediaType: { format: "diff" },
+                }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-compare-commits");
+                // @ts-expect-error - response.data is a string when mediaType.format is "diff"
+                return response.data;
+            }
+            throw new Error("Unsupported event type or missing commit information");
         }
         catch (error) {
             core.error(`Failed to get diff: ${error instanceof Error ? error.message : String(error)}`);
