@@ -1,21 +1,23 @@
 {
   "action": "opened",
+  "number": 1881,
   "pull_request": {
-    "number": 1,
-    "title": "Test PR",
-    "body": "This is a test PR for local testing",
+    "number": 1881,
+    "title": "THERA-3769/thera-wallet-fe",
+    "body": "",
     "base": {
-      "sha": "base-sha"
+      "sha": "05407f1b8025a543e1e96c6b9e046ecc69f45e7a",
+      "ref": "staging"
     },
     "head": {
-      "sha": "head-sha"
+      "sha": "ef5e38718b5012ec9913151fc393e880259ba77e",
+      "ref": "THERA-3769/thera-wallet-fe"
     }
   },
   "repository": {
-    "name": "test-repo",
+    "name": "thera-fe",
     "owner": {
-      "login": "test-owner"
+      "login": "CarbonNYC"
     }
-  },
-  "number": 1
+  }
 }

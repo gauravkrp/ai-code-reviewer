@@ -13,6 +13,7 @@ const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL") || "o3-mini";
 const ANTHROPIC_API_KEY: string = core.getInput("ANTHROPIC_API_KEY");
 const ANTHROPIC_API_MODEL: string = core.getInput("ANTHROPIC_API_MODEL") || "claude-3-7-sonnet-20250219"; // Latest model
+const MAX_FILES: number = parseInt(core.getInput("MAX_FILES") || "0", 10); // 0 means no limit
 const EXCLUDE_PATTERNS: string[] = core
   .getInput("exclude")
   .split(",")
@@ -40,16 +41,9 @@ interface PRDetails {
 interface ReviewComment {
   body: string;
   path: string;
-  position: number;  // Required: The position in the diff where you want to add a review comment
-  line?: number;     // Optional: The line of the blob in the pull request diff that the comment applies to
-  side?: 'RIGHT' | 'LEFT';  // Optional: The side of the diff that the comment applies to
-  commit_id?: string;  // Optional: The SHA of the commit needing to be reviewed
-  line_number?: number;  // Optional: The line number in the file to comment on
-  start_line?: number;  // Optional: The line of the blob in the pull request diff that the comment applies to
-  start_side?: 'RIGHT' | 'LEFT';  // Optional: The side of the diff that the comment applies to
-  original_line?: number;  // Optional: The line of the blob in the pull request diff that the comment applies to
-  original_start_line?: number;  // Optional: The line of the blob in the pull request diff that the comment applies to
-  original_commit_id?: string;  // Optional: The SHA of the commit needing to be reviewed
+  line: number;  // The line number in the file to comment on
+  side?: 'RIGHT' | 'LEFT';  // Which side of the diff to place the comment
+  commit_id?: string;  // The SHA of the commit to comment on
 }
 
 interface AIReviewResponse {
@@ -129,29 +123,46 @@ async function analyzeCode(
   const comments: ReviewComment[] = [];
   core.info(`Analyzing ${parsedDiff.length} files...`);
 
-  for (const file of parsedDiff) {
+  // Apply MAX_FILES limit if set
+  const filesToAnalyze = MAX_FILES > 0 ? parsedDiff.slice(0, MAX_FILES) : parsedDiff;
+  if (MAX_FILES > 0 && parsedDiff.length > MAX_FILES) {
+    core.info(`Limiting analysis to first ${MAX_FILES} files as per MAX_FILES setting`);
+  }
+
+  for (const file of filesToAnalyze) {
     if (file.to === "/dev/null") {
       core.debug(`Skipping deleted file: ${file.from}`);
       continue; // Ignore deleted files
     }
     
-    core.debug(`Analyzing file: ${file.to}`);
+    core.info(`\nAnalyzing file: ${file.to}`);
+    core.info(`Changes: +${file.additions} -${file.deletions} lines`);
     
     for (const chunk of file.chunks) {
+      core.debug(`Processing chunk at lines ${chunk.oldStart},${chunk.oldLines} -> ${chunk.newStart},${chunk.newLines}`);
       const prompt = createPrompt(file, chunk, prDetails);
+      core.debug('Sending prompt to AI:\n' + prompt);
+      
       const aiResponse = await getAIResponse(prompt);
       
       if (aiResponse && aiResponse.length > 0) {
+        core.info(`Received ${aiResponse.length} comments from AI for file ${file.to}:`);
+        aiResponse.forEach(response => {
+          core.info(`- Line ${response.lineNumber}: ${response.reviewComment}`);
+        });
+        
         const newComments = createComment(file, chunk, aiResponse);
         if (newComments.length > 0) {
           core.debug(`Generated ${newComments.length} comments for ${file.to}`);
           comments.push(...newComments);
         }
+      } else {
+        core.debug(`No comments generated for chunk in ${file.to}`);
       }
     }
   }
   
-  core.info(`Analysis complete. Generated ${comments.length} comments.`);
+  core.info(`\nAnalysis complete. Generated ${comments.length} comments total.`);
   return comments;
 }
 
@@ -357,26 +368,11 @@ function createComment(
       return null;
     }
 
-    // Calculate position in the diff
-    // Position is the line number in the diff where the comment should be placed
-    // This is typically the line number in the new file (ln2) for additions
-    // or the line number in the old file (ln) for deletions
-    // @ts-expect-error - ln and ln2 exist where needed
-    const position = change.ln2 || change.ln;
-
     const comment: ReviewComment = {
-      body: aiResponse.reviewComment,
       path: file.to!,
-      position,  // Required field
-      line: lineNumber,  // The line number in the file
-      side: 'RIGHT' as const,  // Default to right side (new code)
-      // @ts-expect-error - ln and ln2 exist where needed
-      original_line: change.ln || change.ln2,
-      // @ts-expect-error - ln and ln2 exist where needed
-      line_number: change.ln2 || change.ln,
-      start_line: chunk.oldStart,
-      original_start_line: chunk.oldStart,
-      original_commit_id: chunk.oldLines ? chunk.oldLines.toString() : undefined
+      body: aiResponse.reviewComment,
+      line: lineNumber,
+      side: 'RIGHT'  // We always comment on the new version
     };
 
     return comment;
@@ -394,13 +390,28 @@ async function createReviewComment(
 ): Promise<void> {
   try {
     core.info(`Creating review with ${comments.length} comments`);
+
+    // First get the latest commit SHA
+    const { data: pr } = await octokit.pulls.get({
+      owner,
+      repo,
+      pull_number,
+    });
+
+    const commitId = pr.head.sha;
     
     await octokit.pulls.createReview({
       owner,
       repo,
       pull_number,
-      comments,
+      commit_id: commitId,
       event: "COMMENT",
+      comments: comments.map(comment => ({
+        path: comment.path,
+        body: comment.body,
+        line: comment.line,
+        side: comment.side
+      }))
     });
     
     core.info("Review created successfully");
@@ -509,6 +520,11 @@ function validateConfig(): void {
 export async function main() {
   try {
     core.info("Starting AI code review");
+    core.info(`Configuration:
+- AI Provider: ${AI_PROVIDER}
+- Model: ${AI_PROVIDER === 'openai' ? OPENAI_API_MODEL : ANTHROPIC_API_MODEL}
+- Max Files: ${MAX_FILES > 0 ? MAX_FILES : 'No limit'}
+- Exclude Patterns: ${EXCLUDE_PATTERNS.length > 0 ? EXCLUDE_PATTERNS.join(', ') : 'None'}`);
     
     // Validate configuration
     validateConfig();
@@ -516,6 +532,10 @@ export async function main() {
     // Get PR details
     const prDetails = await getPRDetails();
     core.info(`Processing PR #${prDetails.pull_number} in ${prDetails.owner}/${prDetails.repo}`);
+    core.info(`PR Title: ${prDetails.title}`);
+    if (prDetails.description) {
+      core.info(`PR Description: ${prDetails.description}`);
+    }
     
     // Get diff
     const diff = await getDiffForEvent(prDetails);
@@ -527,17 +547,23 @@ export async function main() {
     
     // Parse and filter diff
     const parsedDiff = parseDiff(diff);
-    core.info(`Found ${parsedDiff.length} changed files`);
+    core.info(`\nFound ${parsedDiff.length} changed files:`);
+    parsedDiff.forEach(file => {
+      core.info(`- ${file.to} (+${file.additions} -${file.deletions})`);
+    });
     
     const filteredDiff = filterFiles(parsedDiff);
-    core.info(`Analyzing ${filteredDiff.length} files after filtering`);
+    core.info(`\nAnalyzing ${filteredDiff.length} files after filtering`);
     
     // Analyze code and create comments
     const comments = await analyzeCode(filteredDiff, prDetails);
     
     // Create review if there are comments
     if (comments.length > 0) {
-      core.info(`Creating review with ${comments.length} comments`);
+      core.info(`\nCreating review with ${comments.length} comments:`);
+      comments.forEach(comment => {
+        core.info(`- ${comment.path}:${comment.line} - ${comment.body.split('\n')[0]}...`);
+      });
       await createReviewComment(
         prDetails.owner,
         prDetails.repo,
@@ -545,10 +571,10 @@ export async function main() {
         comments
       );
     } else {
-      core.info("No comments to add");
+      core.info("\nNo comments to add");
     }
     
-    core.info("AI code review completed successfully");
+    core.info("\nAI code review completed successfully");
   } catch (error) {
     core.setFailed(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
   }

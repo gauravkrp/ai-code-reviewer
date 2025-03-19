@@ -57,6 +57,7 @@ const OPENAI_API_KEY = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL") || "o3-mini";
 const ANTHROPIC_API_KEY = core.getInput("ANTHROPIC_API_KEY");
 const ANTHROPIC_API_MODEL = core.getInput("ANTHROPIC_API_MODEL") || "claude-3-7-sonnet-20250219"; // Latest model
+const MAX_FILES = parseInt(core.getInput("MAX_FILES") || "0", 10); // 0 means no limit
 const EXCLUDE_PATTERNS = core
     .getInput("exclude")
     .split(",")
@@ -132,25 +133,40 @@ function analyzeCode(parsedDiff, prDetails) {
     return __awaiter(this, void 0, void 0, function* () {
         const comments = [];
         core.info(`Analyzing ${parsedDiff.length} files...`);
-        for (const file of parsedDiff) {
+        // Apply MAX_FILES limit if set
+        const filesToAnalyze = MAX_FILES > 0 ? parsedDiff.slice(0, MAX_FILES) : parsedDiff;
+        if (MAX_FILES > 0 && parsedDiff.length > MAX_FILES) {
+            core.info(`Limiting analysis to first ${MAX_FILES} files as per MAX_FILES setting`);
+        }
+        for (const file of filesToAnalyze) {
             if (file.to === "/dev/null") {
                 core.debug(`Skipping deleted file: ${file.from}`);
                 continue; // Ignore deleted files
             }
-            core.debug(`Analyzing file: ${file.to}`);
+            core.info(`\nAnalyzing file: ${file.to}`);
+            core.info(`Changes: +${file.additions} -${file.deletions} lines`);
             for (const chunk of file.chunks) {
+                core.debug(`Processing chunk at lines ${chunk.oldStart},${chunk.oldLines} -> ${chunk.newStart},${chunk.newLines}`);
                 const prompt = createPrompt(file, chunk, prDetails);
+                core.debug('Sending prompt to AI:\n' + prompt);
                 const aiResponse = yield getAIResponse(prompt);
                 if (aiResponse && aiResponse.length > 0) {
+                    core.info(`Received ${aiResponse.length} comments from AI for file ${file.to}:`);
+                    aiResponse.forEach(response => {
+                        core.info(`- Line ${response.lineNumber}: ${response.reviewComment}`);
+                    });
                     const newComments = createComment(file, chunk, aiResponse);
                     if (newComments.length > 0) {
                         core.debug(`Generated ${newComments.length} comments for ${file.to}`);
                         comments.push(...newComments);
                     }
                 }
+                else {
+                    core.debug(`No comments generated for chunk in ${file.to}`);
+                }
             }
         }
-        core.info(`Analysis complete. Generated ${comments.length} comments.`);
+        core.info(`\nAnalysis complete. Generated ${comments.length} comments total.`);
         return comments;
     });
 }
@@ -331,25 +347,11 @@ function createComment(file, chunk, aiResponses) {
             core.warning(`No matching change found for line number ${lineNumber}`);
             return null;
         }
-        // Calculate position in the diff
-        // Position is the line number in the diff where the comment should be placed
-        // This is typically the line number in the new file (ln2) for additions
-        // or the line number in the old file (ln) for deletions
-        // @ts-expect-error - ln and ln2 exist where needed
-        const position = change.ln2 || change.ln;
         const comment = {
-            body: aiResponse.reviewComment,
             path: file.to,
-            position,
+            body: aiResponse.reviewComment,
             line: lineNumber,
-            side: 'RIGHT',
-            // @ts-expect-error - ln and ln2 exist where needed
-            original_line: change.ln || change.ln2,
-            // @ts-expect-error - ln and ln2 exist where needed
-            line_number: change.ln2 || change.ln,
-            start_line: chunk.oldStart,
-            original_start_line: chunk.oldStart,
-            original_commit_id: chunk.oldLines ? chunk.oldLines.toString() : undefined
+            side: 'RIGHT' // We always comment on the new version
         };
         return comment;
     }).filter((comment) => comment !== null);
@@ -361,12 +363,25 @@ function createReviewComment(owner, repo, pull_number, comments) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             core.info(`Creating review with ${comments.length} comments`);
+            // First get the latest commit SHA
+            const { data: pr } = yield octokit.pulls.get({
+                owner,
+                repo,
+                pull_number,
+            });
+            const commitId = pr.head.sha;
             yield octokit.pulls.createReview({
                 owner,
                 repo,
                 pull_number,
-                comments,
+                commit_id: commitId,
                 event: "COMMENT",
+                comments: comments.map(comment => ({
+                    path: comment.path,
+                    body: comment.body,
+                    line: comment.line,
+                    side: comment.side
+                }))
             });
             core.info("Review created successfully");
         }
@@ -462,11 +477,20 @@ function main() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             core.info("Starting AI code review");
+            core.info(`Configuration:
+- AI Provider: ${AI_PROVIDER}
+- Model: ${AI_PROVIDER === 'openai' ? OPENAI_API_MODEL : ANTHROPIC_API_MODEL}
+- Max Files: ${MAX_FILES > 0 ? MAX_FILES : 'No limit'}
+- Exclude Patterns: ${EXCLUDE_PATTERNS.length > 0 ? EXCLUDE_PATTERNS.join(', ') : 'None'}`);
             // Validate configuration
             validateConfig();
             // Get PR details
             const prDetails = yield getPRDetails();
             core.info(`Processing PR #${prDetails.pull_number} in ${prDetails.owner}/${prDetails.repo}`);
+            core.info(`PR Title: ${prDetails.title}`);
+            if (prDetails.description) {
+                core.info(`PR Description: ${prDetails.description}`);
+            }
             // Get diff
             const diff = yield getDiffForEvent(prDetails);
             if (!diff) {
@@ -475,20 +499,26 @@ function main() {
             }
             // Parse and filter diff
             const parsedDiff = (0, parse_diff_1.default)(diff);
-            core.info(`Found ${parsedDiff.length} changed files`);
+            core.info(`\nFound ${parsedDiff.length} changed files:`);
+            parsedDiff.forEach(file => {
+                core.info(`- ${file.to} (+${file.additions} -${file.deletions})`);
+            });
             const filteredDiff = filterFiles(parsedDiff);
-            core.info(`Analyzing ${filteredDiff.length} files after filtering`);
+            core.info(`\nAnalyzing ${filteredDiff.length} files after filtering`);
             // Analyze code and create comments
             const comments = yield analyzeCode(filteredDiff, prDetails);
             // Create review if there are comments
             if (comments.length > 0) {
-                core.info(`Creating review with ${comments.length} comments`);
+                core.info(`\nCreating review with ${comments.length} comments:`);
+                comments.forEach(comment => {
+                    core.info(`- ${comment.path}:${comment.line} - ${comment.body.split('\n')[0]}...`);
+                });
                 yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
             }
             else {
-                core.info("No comments to add");
+                core.info("\nNo comments to add");
             }
-            core.info("AI code review completed successfully");
+            core.info("\nAI code review completed successfully");
         }
         catch (error) {
             core.setFailed(`Action failed: ${error instanceof Error ? error.message : String(error)}`);

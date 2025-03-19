@@ -1,120 +1,112 @@
+// First, load dotenv and set all environment variables
+import dotenv from 'dotenv';
+dotenv.config();
+
+// Set all required environment variables BEFORE any other imports
+process.env.GITHUB_EVENT_PATH = './__tests/fixtures/pull_request.json';
+process.env.INPUT_GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+process.env.INPUT_OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+process.env.INPUT_AI_PROVIDER = 'openai';
+process.env.INPUT_OPENAI_API_MODEL = 'o3-mini';
+// Exclude lock files and limit files for testing
+process.env.INPUT_EXCLUDE = '**/*lock.json,**/yarn.lock,**/package-lock.json';
+process.env.INPUT_MAX_FILES = '5';  // Limit to first 5 files for testing
+
+// Set up logging for AI responses
+process.env.ACTIONS_STEP_DEBUG = 'true';  // Enable debug logging
+process.env.ACTIONS_RUNNER_DEBUG = 'true';  // Enable runner debugging
+
+// Now import other dependencies
 import { readFileSync, writeFileSync } from 'fs';
 import * as core from '@actions/core';
-import { main } from './src/main';
 import { Octokit } from '@octokit/rest';
-import { jest } from '@jest/globals';
+import { main } from '../src/main';
 
-// Mock GitHub Action environment
-process.env.GITHUB_EVENT_PATH = './test/fixtures/pull_request.json';
-process.env.GITHUB_TOKEN = process.env.GITHUB_TOKEN || 'test-token';
-process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'test-openai-key';
-process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test-anthropic-key';
+// Initialize Octokit with your token
+const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
-// Create test fixtures directory if it doesn't exist
-const fs = require('fs');
-if (!fs.existsSync('./test/fixtures')) {
-  fs.mkdirSync('./test/fixtures', { recursive: true });
+async function getPRDetails() {
+  try {
+    const { data: pr } = await octokit.pulls.get({
+      owner: 'CarbonNYC',
+      repo: 'thera-fe',
+      pull_number: 1881
+    });
+
+    return {
+      base: {
+        sha: pr.base.sha,
+        ref: pr.base.ref
+      },
+      head: {
+        sha: pr.head.sha,
+        ref: pr.head.ref
+      },
+      title: pr.title,
+      body: pr.body || ""
+    };
+  } catch (error) {
+    console.error('Failed to fetch PR details:', error);
+    throw error;
+  }
 }
 
-// Create a test pull request event
-const pullRequestEvent = {
-  action: "opened",
-  pull_request: {
-    number: 1,
-    title: "Test PR",
-    body: "This is a test PR for local testing",
-    base: {
-      sha: "base-sha"
-    },
-    head: {
-      sha: "head-sha"
-    }
-  },
-  repository: {
-    name: "test-repo",
-    owner: {
-      login: "test-owner"
-    }
-  }
-};
+// Main execution
+async function run() {
+  try {
+    console.log('Fetching PR details...');
+    const prDetails = await getPRDetails();
+    console.log('PR details fetched:', {
+      base: { sha: prDetails.base.sha, ref: prDetails.base.ref },
+      head: { sha: prDetails.head.sha, ref: prDetails.head.ref }
+    });
 
-// Write the test event to a file
-writeFileSync('./test/fixtures/pull_request.json', JSON.stringify(pullRequestEvent, null, 2));
-
-// Create a test diff
-const testDiff = `diff --git a/test.ts b/test.ts
-new file mode 100644
-index 0000000..1234567
---- /dev/null
-+++ b/test.ts
-@@ -0,0 +1,10 @@
-+function test() {
-+    console.log("Hello World");
-+}
-+
-+// This is a test function
-+function add(a: number, b: number): number {
-+    return a + b;
-+}
-+
-+test();
-+add(1, 2);
-`;
-
-// Write the test diff to a file
-writeFileSync('./test/fixtures/test.diff', testDiff);
-
-// Mock Octokit
-const mockOctokit = {
-  pulls: {
-    get: jest.fn().mockResolvedValue({
-      data: {
-        title: 'Test PR',
-        body: 'This is a test PR for local testing',
-        number: 1
+    // Set up environment for the actual PR
+    const PR_EVENT = {
+      action: "opened",
+      number: 1881,
+      pull_request: {
+        number: 1881,
+        title: prDetails.title,
+        body: prDetails.body,
+        base: prDetails.base,
+        head: prDetails.head
+      },
+      repository: {
+        name: "thera-fe",
+        owner: {
+          login: "CarbonNYC"
+        }
       }
-    } as any)
-  },
-  repos: {
-    compareCommits: jest.fn().mockResolvedValue({
-      data: testDiff
-    } as any)
+    };
+
+    // Create fixtures directory if it doesn't exist
+    const fs = require('fs');
+    if (!fs.existsSync('./__tests/fixtures')) {
+      fs.mkdirSync('./__tests/fixtures', { recursive: true });
+    }
+
+    // Write PR event data
+    writeFileSync('./__tests/fixtures/pull_request.json', JSON.stringify(PR_EVENT, null, 2));
+
+    // Log environment setup for debugging
+    console.log('\nEnvironment setup:');
+    console.log('- GITHUB_TOKEN:', process.env.INPUT_GITHUB_TOKEN ? '✓ Set' : '✗ Not set');
+    console.log('- OPENAI_API_KEY:', process.env.INPUT_OPENAI_API_KEY ? '✓ Set' : '✗ Not set');
+    console.log('- AI_PROVIDER:', process.env.INPUT_AI_PROVIDER);
+    console.log('- OPENAI_API_MODEL:', process.env.INPUT_OPENAI_API_MODEL);
+    console.log('- EXCLUDE:', process.env.INPUT_EXCLUDE);
+    console.log('- MAX_FILES:', process.env.INPUT_MAX_FILES);
+
+    // Run the main function with actual API calls
+    console.log('\nStarting review of PR #1881...');
+    await main();
+    console.log('Review completed successfully');
+  } catch (error) {
+    console.error('Test failed:', error);
+    process.exit(1);
   }
-};
+}
 
-jest.mock('@octokit/rest', () => ({
-  Octokit: jest.fn().mockImplementation(() => mockOctokit)
-}));
-
-// Mock core.getInput
-const originalGetInput = core.getInput;
-// @ts-expect-error - We need to mock this for testing
-core.getInput = (name: string): string => {
-  switch (name) {
-    case 'GITHUB_TOKEN':
-      return process.env.GITHUB_TOKEN || 'test-token';
-    case 'OPENAI_API_KEY':
-      return process.env.OPENAI_API_KEY || 'test-openai-key';
-    case 'ANTHROPIC_API_KEY':
-      return process.env.ANTHROPIC_API_KEY || 'test-anthropic-key';
-    case 'AI_PROVIDER':
-      return 'openai';
-    case 'OPENAI_API_MODEL':
-      return 'o3-mini';
-    case 'ANTHROPIC_API_MODEL':
-      return 'claude-3-7-sonnet-20250219';
-    case 'exclude':
-      return 'yarn.lock,dist/**';
-    default:
-      return originalGetInput(name);
-  }
-};
-
-// Run the main function
-console.log('Starting local test...');
-main().then(() => {
-  console.log('Test completed successfully');
-}).catch((error: Error) => {
-  console.error('Test failed:', error);
-  process.exit(1);
-}); 
+// Run the async function
+run();
