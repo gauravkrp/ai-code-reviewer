@@ -172,18 +172,21 @@ export async function createReviewComment(
     const validFiles = new Set(parsedDiff.map(file => file.to).filter(Boolean));
     
     // Enhanced validation with diff awareness
-    const validatedComments = comments.filter(comment => {
+    const validatedComments = await Promise.all(comments.map(async (comment) => {
+      // Additional logging for each comment being validated
+      core.debug(`Validating comment: ${comment.path}:${comment.line}`);
+
       // Validate path exists in current PR diff
       if (!validFiles.has(comment.path)) {
         core.warning(`File path ${comment.path} not found in PR diff - skipping comment`);
-        return false;
+        return null;
       }
       
       // Find the file in the diff
       const diffFile = parsedDiff.find(file => file.to === comment.path);
       if (!diffFile) {
         core.warning(`File ${comment.path} not found in parsed diff - skipping comment`);
-        return false;
+        return null;
       }
       
       // Check if the line number is within any chunk's range
@@ -194,33 +197,114 @@ export async function createReviewComment(
       
       if (!isLineInAnyChunk) {
         core.warning(`Line ${comment.line} in file ${comment.path} not found in any diff chunk - skipping comment`);
-        return false;
+        
+        // Log the available chunks for debugging
+        const chunkRanges = diffFile.chunks.map(chunk => {
+          return `${chunk.newStart}-${chunk.newStart + chunk.newLines - 1}`;
+        }).join(', ');
+        core.debug(`Available chunks in ${comment.path}: ${chunkRanges}`);
+        
+        // Attempt to validate line against full file content via GitHub API
+        try {
+          core.debug(`Attempting to validate line ${comment.line} against full file content...`);
+          
+          // Get the file content from GitHub to check if line is valid in full file
+          const fileContentResponse = await withRetry(
+            () => octokit.repos.getContent({
+              owner,
+              repo,
+              path: comment.path,
+              ref: commitId
+            }),
+            MAX_RETRIES,
+            RETRY_DELAY,
+            "github-api-get-content"
+          );
+          
+          if ('content' in fileContentResponse.data && fileContentResponse.data.content) {
+            const fileContent = Buffer.from(fileContentResponse.data.content, 'base64').toString('utf8');
+            const fileLines = fileContent.split('\n');
+            
+            if (comment.line <= fileLines.length) {
+              core.info(`Line ${comment.line} exists in full file (outside diff chunks) - keeping comment`);
+              
+              // Adjust comment to point to a valid line in the diff if possible
+              const nearestChunk = diffFile.chunks
+                .map(chunk => ({
+                  chunk,
+                  start: chunk.newStart,
+                  end: chunk.newStart + chunk.newLines - 1,
+                  distance: Math.min(
+                    Math.abs(comment.line - chunk.newStart),
+                    Math.abs(comment.line - (chunk.newStart + chunk.newLines - 1))
+                  )
+                }))
+                .sort((a, b) => a.distance - b.distance)[0];
+              
+              if (nearestChunk) {
+                core.info(`Adjusting line ${comment.line} to ${nearestChunk.start} (nearest valid line in diff chunk)`);
+                
+                // Create an adjusted copy of the comment
+                const adjustedComment = {
+                  ...comment,
+                  line: nearestChunk.start,
+                  body: `**Note: This comment was originally for line ${comment.line} but was adjusted to fit in the viewable diff.**\n\n${comment.body}`
+                };
+                
+                return adjustedComment;
+              }
+            } else {
+              core.debug(`Line ${comment.line} exceeds file length (${fileLines.length} lines) - skipping comment`);
+            }
+          }
+        } catch (error) {
+          core.debug(`Failed to validate line against full file content: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        
+        return null;
       }
       
       // Validate other aspects
       if (typeof comment.line !== 'number' || comment.line <= 0) {
         core.warning(`Invalid line number ${comment.line} for file ${comment.path} - skipping comment`);
-        return false;
+        return null;
       }
       
       if (!comment.body || comment.body.trim() === "") {
         core.warning(`Empty comment body at line ${comment.line} for file ${comment.path} - skipping comment`);
-        return false;
+        return null;
       }
       
-      return true;
-    });
+      core.debug(`Validated comment at ${comment.path}:${comment.line} - valid`);
+      return comment;
+    }));
 
-    if (validatedComments.length === 0) {
+    // Filter out null values from the validated comments
+    const filteredComments = validatedComments.filter(comment => comment !== null) as ReviewComment[];
+
+    if (filteredComments.length === 0) {
       core.warning("No valid comments after enhanced validation");
+      
+      if (comments.length > 0) {
+        core.debug(`All ${comments.length} comments were filtered out during validation`);
+        // Log a preview of the first few invalid comments
+        const MAX_PREVIEW = 3;
+        comments.slice(0, MAX_PREVIEW).forEach((comment, idx) => {
+          core.debug(`Invalid comment ${idx+1}: ${JSON.stringify(comment)}`);
+        });
+        if (comments.length > MAX_PREVIEW) {
+          core.debug(`...and ${comments.length - MAX_PREVIEW} more invalid comments`);
+        }
+      }
+      
       return;
     }
 
     // Process comments in batches with improved error handling
     const BATCH_SIZE = 10;
     const batches = [];
-    for (let i = 0; i < validatedComments.length; i += BATCH_SIZE) {
-      batches.push(validatedComments.slice(i, i + BATCH_SIZE));
+    for (let i = 0; i < filteredComments.length; i += BATCH_SIZE) {
+      batches.push(filteredComments.slice(i, i + BATCH_SIZE));
     }
 
     let successCount = 0;
@@ -284,11 +368,42 @@ export async function createReviewComment(
         const errorMessage = error instanceof Error ? error.message : String(error);
         core.warning(`Failed to create batch of ${batch.length} comments: ${errorMessage}`);
         
+        // Log more detailed info only for debug logs
+        if (error instanceof Error) {
+          // Log the full error details to debug
+          core.debug(`Full error details: ${JSON.stringify({
+            name: error.name,
+            message: error.message,
+            stack: error.stack
+          }, null, 2)}`);
+          
+          // Log the request details that caused the failure
+          const errorObj = error as any;
+          if (errorObj.request) {
+            core.debug(`Request method: ${errorObj.request.method}`);
+            core.debug(`Request path: ${errorObj.request.path}`);
+          }
+          
+          // Log the response details if available
+          if (errorObj.response) {
+            core.debug(`Response status: ${errorObj.response.status}`);
+            core.debug(`Response headers: ${JSON.stringify(errorObj.response.headers || {})}`);
+            core.debug(`Response data: ${JSON.stringify(errorObj.response.data || {}, null, 2)}`);
+          }
+        }
+        
         // Try to extract the invalid comment from the error message
         if (errorMessage.includes("path is invalid") || 
             errorMessage.includes("line number") || 
             errorMessage.includes("diff hunk")) {
           core.warning("Attempting to identify and remove problematic comments for future batches");
+          
+          // Log the current batch that failed for debugging
+          core.debug(`Failed batch comments: ${JSON.stringify(batch.map(comment => ({
+            path: comment.path,
+            line: comment.line,
+            bodyLength: comment.body?.length || 0
+          })), null, 2)}`);
         }
       }
     }

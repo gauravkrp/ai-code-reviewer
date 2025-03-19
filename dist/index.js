@@ -237,27 +237,76 @@ function processFile(file, prDetails) {
         }
         const comments = [];
         core.debug(`File has ${file.chunks.length} chunks to process`);
-        // Merge small chunks together
+        // Improve chunk merging strategy to handle line number context better
         const mergedChunks = [];
         let currentChunk = null;
-        for (const chunk of file.chunks) {
+        // First, analyze the full file chunk distribution
+        const chunkDistribution = file.chunks.map(chunk => ({
+            start: chunk.newStart,
+            end: chunk.newStart + chunk.newLines - 1,
+            lines: chunk.newLines + chunk.oldLines,
+            chunk
+        }));
+        core.debug(`Chunk distribution in file: ${JSON.stringify(chunkDistribution.map(c => ({ start: c.start, end: c.end, lines: c.lines })))}`);
+        // Check for large gaps between chunks
+        const hasLargeGaps = chunkDistribution.some((chunk, idx) => {
+            if (idx === 0)
+                return false;
+            const prevChunk = chunkDistribution[idx - 1];
+            const gap = chunk.start - (prevChunk.end + 1);
+            return gap > 100; // Consider gaps > 100 lines to be large
+        });
+        if (hasLargeGaps) {
+            core.info(`File ${filePath} has large gaps between chunks, using cautious merging strategy`);
+        }
+        // Merge chunks with better context awareness
+        for (let i = 0; i < file.chunks.length; i++) {
+            const chunk = file.chunks[i];
             if (!currentChunk) {
                 currentChunk = Object.assign({}, chunk);
+                continue;
+            }
+            const currentEnd = currentChunk.newStart + currentChunk.newLines - 1;
+            const nextStart = chunk.newStart;
+            const gap = nextStart - (currentEnd + 1);
+            // Decide whether to merge based on several factors
+            const currentTotalLines = currentChunk.newLines + currentChunk.oldLines;
+            const nextTotalLines = chunk.newLines + chunk.oldLines;
+            const mergedWouldBeTooLarge = (currentTotalLines + nextTotalLines) > config_1.MAX_CHUNK_TOTAL_LINES * 0.8;
+            const gapIsTooLarge = gap > 50; // Don't merge chunks with more than 50 lines between them
+            if (!mergedWouldBeTooLarge && !gapIsTooLarge) {
+                // Calculate virtual lines for the gap
+                const virtualGapChanges = [];
+                // Only add virtual context lines if there is an actual gap
+                if (gap > 0) {
+                    // Add up to 5 context lines to help with continuity
+                    const contextLines = Math.min(gap, 5);
+                    for (let j = 0; j < contextLines; j++) {
+                        virtualGapChanges.push({
+                            type: 'normal',
+                            content: `// Context line ${j + 1} of ${contextLines}`,
+                            normal: true
+                        });
+                    }
+                }
+                // Merge the chunks with any virtual context
+                currentChunk.newLines = (chunk.newStart + chunk.newLines) - currentChunk.newStart;
+                currentChunk.oldLines += chunk.oldLines;
+                currentChunk.changes = [
+                    ...currentChunk.changes,
+                    ...virtualGapChanges,
+                    ...chunk.changes
+                ];
             }
             else {
-                // If the current chunk is small and the next chunk is small, merge them
-                const currentTotalLines = currentChunk.newLines + currentChunk.oldLines;
-                const nextTotalLines = chunk.newLines + chunk.oldLines;
-                if (currentTotalLines < 200 && nextTotalLines < 200) {
-                    // Merge chunks
-                    currentChunk.newLines += chunk.newLines;
-                    currentChunk.oldLines += chunk.oldLines;
-                    currentChunk.changes = [...currentChunk.changes, ...chunk.changes];
+                // Don't merge - add current chunk and start a new one
+                mergedChunks.push(currentChunk);
+                currentChunk = Object.assign({}, chunk);
+                if (mergedWouldBeTooLarge) {
+                    core.debug(`Not merging chunks: combined size would exceed threshold (${currentTotalLines + nextTotalLines} lines)`);
                 }
-                else {
-                    // Add current chunk and start a new one
-                    mergedChunks.push(currentChunk);
-                    currentChunk = Object.assign({}, chunk);
+                if (gapIsTooLarge) {
+                    core.debug(`Not merging chunks: gap too large (${gap} lines between chunks)`);
                 }
             }
         }
@@ -265,10 +314,16 @@ function processFile(file, prDetails) {
         if (currentChunk) {
             mergedChunks.push(currentChunk);
         }
-        core.debug(`Merged ${file.chunks.length} chunks into ${mergedChunks.length} chunks`);
+        core.debug(`Merged ${file.chunks.length} chunks into ${mergedChunks.length} chunks for file ${filePath}`);
+        // Log the merged chunk distribution for debugging
+        mergedChunks.forEach((chunk, idx) => {
+            core.debug(`Merged chunk #${idx + 1}: lines ${chunk.newStart}-${chunk.newStart + chunk.newLines - 1} (${chunk.newLines + chunk.oldLines} total lines)`);
+        });
         for (let i = 0; i < mergedChunks.length; i++) {
             const chunk = mergedChunks[i];
             core.debug(`Processing chunk ${i + 1}/${mergedChunks.length}: lines ${chunk.newStart}-${chunk.newStart + chunk.newLines - 1}`);
+            // Log more details about chunk content
+            core.debug(`Chunk content preview: ${JSON.stringify(chunk.changes.slice(0, 3))}`);
             if ((0, utils_1.isChunkTooLarge)(chunk)) {
                 core.info(`Skipping chunk ${i + 1} in ${filePath}: Chunk exceeds size limits`);
                 continue;
@@ -280,6 +335,11 @@ function processFile(file, prDetails) {
             }
             // Create a prompt for the AI
             const prompt = (0, ai_1.createPrompt)(file, chunk, prDetails);
+            // Log prompt summary instead of full content
+            const promptPreview = prompt.length > 100
+                ? prompt.substring(0, 100) + `... (total length: ${prompt.length} chars)`
+                : prompt;
+            core.debug(`Prompt preview for chunk ${i + 1}: ${promptPreview}`);
             // Get AI response
             core.debug(`Sending chunk ${i + 1} to AI for review`);
             const aiResponses = yield (0, ai_1.getAIResponse)(prompt, chunk, prDetails);
@@ -288,6 +348,20 @@ function processFile(file, prDetails) {
                 continue;
             }
             core.info(`Received ${aiResponses.length} comments from AI for chunk ${i + 1} in ${filePath}`);
+            // Log some details about the AI responses for debugging
+            if (aiResponses.length > 0) {
+                core.debug(`AI response preview: ${JSON.stringify(aiResponses.slice(0, 1))}`);
+                // Check for potentially problematic line numbers ahead of time
+                const invalidLineNums = aiResponses.filter(r => {
+                    const lineNumber = Number(r.lineNumber);
+                    return isNaN(lineNumber) || lineNumber < chunk.newStart || lineNumber > chunk.newStart + chunk.newLines - 1;
+                });
+                if (invalidLineNums.length > 0) {
+                    core.warning(`Found ${invalidLineNums.length} responses with potentially invalid line numbers`);
+                    core.debug(`First invalid response: ${JSON.stringify(invalidLineNums[0])}`);
+                    core.debug(`Chunk range: ${chunk.newStart} to ${chunk.newStart + chunk.newLines - 1}`);
+                }
+            }
             // Process each AI response and create comments
             for (const response of aiResponses) {
                 const comment = (0, ai_1.createComment)(file, chunk, response);
@@ -296,7 +370,8 @@ function processFile(file, prDetails) {
                     comments.push(comment);
                 }
                 else {
-                    core.debug(`Failed to create comment for line ${response.lineNumber} (invalid or out of range)`);
+                    core.error(`Failed to create comment for line ${response.lineNumber} in ${file.to}`);
+                    core.debug(`Response that failed: ${JSON.stringify(response)}`);
                 }
             }
         }
@@ -398,6 +473,10 @@ function main() {
 - Exclude Patterns: ${config_1.EXCLUDE_PATTERNS.length > 0 ? config_1.EXCLUDE_PATTERNS.join(', ') : 'None'}
 - Chunk Size Limits: ${config_1.MAX_CHUNK_TOTAL_LINES} lines
 - File Size Limits: ${config_1.MAX_FILE_TOTAL_LINES} lines`);
+            // Add log file path for debugging
+            if (process.env.RUNNER_DEBUG === '1') {
+                core.info(`Debug mode enabled - full logs will be captured`);
+            }
             // Validate configuration
             validateConfig();
             // Get PR details
@@ -473,10 +552,30 @@ function main() {
         catch (error) {
             const duration = (Date.now() - startTime) / 1000;
             core.error(`AI code review failed after ${duration.toFixed(2)} seconds`);
-            core.setFailed(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
-            // Log stack trace for debugging
-            if (error instanceof Error && error.stack) {
-                core.debug(`Stack trace: ${error.stack}`);
+            // Enhanced error logging
+            if (error instanceof Error) {
+                core.setFailed(`Action failed: ${error.message}`);
+                // Log complete error details for debugging
+                core.debug(`Error name: ${error.name}`);
+                core.debug(`Error message: ${error.message}`);
+                if (error.stack) {
+                    core.debug(`Stack trace: ${error.stack}`);
+                }
+                // Log additional error properties
+                const errorObj = error;
+                if (errorObj.response) {
+                    core.debug(`API Response Status: ${errorObj.response.status}`);
+                    core.debug(`API Response Headers: ${JSON.stringify(errorObj.response.headers || {})}`);
+                    core.debug(`API Response Data: ${JSON.stringify(errorObj.response.data || {}, null, 2)}`);
+                }
+                // If there's a cause, log it too
+                if (errorObj.cause) {
+                    core.debug(`Error cause: ${JSON.stringify(errorObj.cause, null, 2)}`);
+                }
+            }
+            else {
+                core.setFailed(`Action failed: ${String(error)}`);
+                core.debug(`Full error object: ${JSON.stringify(error, null, 2)}`);
             }
         }
     });
@@ -554,6 +653,8 @@ const anthropic = new sdk_1.default({
 function createPrompt(file, chunk, prDetails) {
     const filePath = file.to || file.from || 'unknown';
     const language = (0, utils_1.getLanguageFromPath)(filePath);
+    // Log condensed chunk info rather than full content
+    core.debug(`Creating prompt for ${filePath} (${language}): chunk with ${chunk.changes.length} changes, newLines=${chunk.newLines}, oldLines=${chunk.oldLines}`);
     // Create a context-aware prompt
     const prompt = `Review the following code changes in ${language} file '${filePath}':
 
@@ -639,7 +740,7 @@ exports.getAIResponse = getAIResponse;
  * Gets response from OpenAI API with enhanced error handling and validation
  */
 function getOpenAIResponse(prompt, chunk) {
-    var _a, _b;
+    var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
         // Check if using o3 model family and adjust parameters accordingly
         const isOModel = config_1.OPENAI_API_MODEL.startsWith('o');
@@ -683,7 +784,9 @@ function getOpenAIResponse(prompt, chunk) {
                         content: prompt,
                     },
                 ] })), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "openai-api");
-            const content = (_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim();
+            // Minimal logging during normal operation - only log essential details
+            core.debug(`OpenAI response: model=${response.model}, finish_reason=${(_a = response.choices[0]) === null || _a === void 0 ? void 0 : _a.finish_reason}, content_length=${((_d = (_c = (_b = response.choices[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content) === null || _d === void 0 ? void 0 : _d.length) || 0}`);
+            const content = (_f = (_e = response.choices[0].message) === null || _e === void 0 ? void 0 : _e.content) === null || _f === void 0 ? void 0 : _f.trim();
             if (!content) {
                 core.warning("Received empty response from OpenAI API");
                 return null;
@@ -699,20 +802,70 @@ function getOpenAIResponse(prompt, chunk) {
                 return validReviews;
             }
             catch (parseError) {
+                // In case of error, log more detailed information including content
                 core.error(`Failed to parse OpenAI response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+                // Log the full response details for debugging when there's an error
+                core.debug(`Full OpenAI response details: ${JSON.stringify({
+                    id: response.id,
+                    object: response.object,
+                    model: response.model,
+                    created: response.created,
+                    choices: response.choices.map(c => {
+                        var _a, _b;
+                        return ({
+                            index: c.index,
+                            finish_reason: c.finish_reason,
+                            content_length: ((_b = (_a = c.message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.length) || 0
+                        });
+                    })
+                }, null, 2)}`);
+                // Log the raw content that failed to parse - only a limited preview in normal logs
+                const previewLength = 200;
+                core.error(`Content preview (${content.length} chars): ${content.substring(0, previewLength)}${content.length > previewLength ? '...' : ''}`);
+                // But log full content in debug for troubleshooting
+                core.debug(`Full content that failed to parse (${content.length} chars): ${content}`);
                 // Attempt to salvage JSON if it's truncated
                 try {
                     core.debug("Attempting to salvage truncated JSON response...");
+                    // Log the content length
+                    core.debug(`Content length: ${content.length} characters`);
                     // Try to find the last complete review object without using 's' flag
                     const contentNoNewlines = content.replace(/\n/g, ' ');
                     const lastCompleteReviewMatch = contentNoNewlines.match(/"reviews"\s*:\s*\[\s*(.*?)(\}\s*\]|\}\s*,\s*\{)/);
                     if (lastCompleteReviewMatch && lastCompleteReviewMatch[1]) {
                         // Create a valid JSON structure with just the first complete review
                         const salvaged = `{"reviews":[${lastCompleteReviewMatch[1]}]}`;
+                        core.debug(`Salvaged JSON attempt: ${salvaged}`);
                         const parsedSalvaged = JSON.parse(salvaged);
                         if (parsedSalvaged.reviews && parsedSalvaged.reviews.length > 0) {
                             core.info(`Salvaged ${parsedSalvaged.reviews.length} reviews from truncated JSON`);
+                            // Log each salvaged review
+                            parsedSalvaged.reviews.forEach((review, idx) => {
+                                core.debug(`Salvaged review ${idx + 1}: ${JSON.stringify(review)}`);
+                            });
                             return parsedSalvaged.reviews.filter(utils_1.validateAIResponse);
+                        }
+                    }
+                    // Try another approach - look for complete objects in array
+                    const objectMatches = content.match(/\{[^{}]*\}/g);
+                    if (objectMatches && objectMatches.length > 0) {
+                        core.debug(`Found ${objectMatches.length} potential JSON objects in response`);
+                        // Try to parse each one
+                        const validObjects = [];
+                        for (const objStr of objectMatches) {
+                            try {
+                                const obj = JSON.parse(objStr);
+                                if (obj && typeof obj === 'object' && (0, utils_1.validateAIResponse)(obj)) {
+                                    validObjects.push(obj);
+                                }
+                            }
+                            catch (e) {
+                                // Ignore parsing errors for individual objects
+                            }
+                        }
+                        if (validObjects.length > 0) {
+                            core.info(`Salvaged ${validObjects.length} review objects directly from content`);
+                            return validObjects;
                         }
                     }
                 }
@@ -743,6 +896,7 @@ function getOpenAIResponse(prompt, chunk) {
  * Gets response from Anthropic API with enhanced error handling and validation
  */
 function getAnthropicResponse(prompt) {
+    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
         try {
             core.debug(`Sending request to Anthropic API with model: ${config_1.ANTHROPIC_API_MODEL}`);
@@ -770,6 +924,10 @@ function getAnthropicResponse(prompt) {
                     },
                 ],
             }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "anthropic-api");
+            // Minimal logging during normal operation
+            const contentBlocks = ((_a = response.content) === null || _a === void 0 ? void 0 : _a.filter(block => block.type === 'text')) || [];
+            const totalLength = contentBlocks.reduce((sum, block) => sum + ('text' in block ? block.text.length : 0), 0);
+            core.debug(`Anthropic response: model=${response.model}, stop_reason=${response.stop_reason}, content_blocks=${contentBlocks.length}, total_length=${totalLength}`);
             // Process the content blocks from the response
             let textContent = "";
             // The content property is an array of content blocks
@@ -796,7 +954,22 @@ function getAnthropicResponse(prompt) {
                 return validReviews;
             }
             catch (parseError) {
+                // In case of error, log more detailed information
                 core.error(`Failed to parse Anthropic response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+                // Log more details about the response in debug when there's an error
+                core.debug(`Full Anthropic response details: ${JSON.stringify({
+                    id: response.id,
+                    model: response.model,
+                    stop_reason: response.stop_reason,
+                    stop_sequence: response.stop_sequence,
+                    usage: response.usage,
+                    content_blocks: ((_b = response.content) === null || _b === void 0 ? void 0 : _b.length) || 0
+                }, null, 2)}`);
+                // Log content preview in error logs
+                const previewLength = 200;
+                core.error(`Content preview (${textContent.length} chars): ${textContent.substring(0, previewLength)}${textContent.length > previewLength ? '...' : ''}`);
+                // Full content in debug logs
+                core.debug(`Full content that failed to parse (${textContent.length} chars): ${textContent}`);
                 return null;
             }
         }
@@ -807,7 +980,8 @@ function getAnthropicResponse(prompt) {
                 const errorObj = error;
                 if (errorObj.response) {
                     core.error(`API Response Status: ${errorObj.response.status}`);
-                    core.error(`API Response Data: ${JSON.stringify(errorObj.response.data || {})}`);
+                    core.debug(`API Response Headers: ${JSON.stringify(errorObj.response.headers || {})}`);
+                    core.debug(`API Response Data: ${JSON.stringify(errorObj.response.data || {}, null, 2)}`);
                 }
                 if (errorObj.status) {
                     core.error(`API Status: ${errorObj.status}`);
@@ -825,13 +999,49 @@ function getAnthropicResponse(prompt) {
  */
 function createComment(file, chunk, aiResponse) {
     if (!file.to) {
+        core.debug(`Cannot create comment: File path is missing in the diff`);
+        return null;
+    }
+    // Validate AI response
+    if (!aiResponse || typeof aiResponse !== 'object') {
+        core.error(`Invalid AI response format: ${JSON.stringify(aiResponse)}`);
         return null;
     }
     // Validate the line number is within the chunk's range
     const lineNumber = Number(aiResponse.lineNumber);
-    if (isNaN(lineNumber) || lineNumber < chunk.newStart || lineNumber > chunk.newStart + chunk.newLines - 1) {
-        core.warning(`Invalid line number ${lineNumber} for chunk starting at ${chunk.newStart}`);
+    if (isNaN(lineNumber)) {
+        core.error(`Invalid line number format in AI response: ${aiResponse.lineNumber}`);
+        core.debug(`Full AI response: ${JSON.stringify(aiResponse, null, 2)}`);
         return null;
+    }
+    // Check if line number is outside chunk range
+    if (lineNumber < chunk.newStart || lineNumber > chunk.newStart + chunk.newLines - 1) {
+        core.warning(`Invalid line number ${lineNumber} for chunk starting at ${chunk.newStart}`);
+        core.debug(`Chunk details: start=${chunk.newStart}, lines=${chunk.newLines}, end=${chunk.newStart + chunk.newLines - 1}`);
+        core.debug(`Full AI response: ${JSON.stringify(aiResponse, null, 2)}`);
+        // FOR SALVAGING INVALID LINE COMMENTS: Adjust the line number to fit within the chunk range
+        // Instead of discarding, fix the line number to be within the valid range
+        const adjustedLineNumber = Math.min(Math.max(lineNumber, chunk.newStart), chunk.newStart + chunk.newLines - 1);
+        core.info(`Adjusting line number from ${lineNumber} to ${adjustedLineNumber} to fit within valid range`);
+        // Format the comment body to properly handle code suggestions
+        let formattedComment = `**Note: This comment was originally for line ${lineNumber} but was adjusted to fit in the viewable diff.**\n\n${aiResponse.reviewComment}`;
+        // If the comment contains code suggestions, format them properly
+        const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+        if (codeBlockRegex.test(formattedComment)) {
+            // Replace code blocks with properly formatted ones
+            formattedComment = formattedComment.replace(codeBlockRegex, (match, lang, code) => {
+                // If no language is specified, try to detect it from the file extension
+                const language = lang || (0, utils_1.getLanguageFromPath)(file.to || '').toLowerCase();
+                return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
+            });
+        }
+        // Create adjusted comment
+        return {
+            path: file.to,
+            line: adjustedLineNumber,
+            body: formattedComment,
+            side: 'RIGHT'
+        };
     }
     // Format the comment body to properly handle code suggestions
     let formattedComment = aiResponse.reviewComment;
@@ -1023,17 +1233,19 @@ function createReviewComment(owner, repo, pull_number, comments) {
             const parsedDiff = (0, parse_diff_1.default)(prDiff.data);
             const validFiles = new Set(parsedDiff.map(file => file.to).filter(Boolean));
             // Enhanced validation with diff awareness
-            const validatedComments = comments.filter(comment => {
+            const validatedComments = yield Promise.all(comments.map((comment) => __awaiter(this, void 0, void 0, function* () {
+                // Additional logging for each comment being validated
+                core.debug(`Validating comment: ${comment.path}:${comment.line}`);
                 // Validate path exists in current PR diff
                 if (!validFiles.has(comment.path)) {
                     core.warning(`File path ${comment.path} not found in PR diff - skipping comment`);
-                    return false;
+                    return null;
                 }
                 // Find the file in the diff
                 const diffFile = parsedDiff.find(file => file.to === comment.path);
                 if (!diffFile) {
                     core.warning(`File ${comment.path} not found in parsed diff - skipping comment`);
-                    return false;
+                    return null;
                 }
                 // Check if the line number is within any chunk's range
                 const isLineInAnyChunk = diffFile.chunks.some(chunk => {
@@ -1042,28 +1254,86 @@ function createReviewComment(owner, repo, pull_number, comments) {
                 });
                 if (!isLineInAnyChunk) {
                     core.warning(`Line ${comment.line} in file ${comment.path} not found in any diff chunk - skipping comment`);
-                    return false;
+                    // Log the available chunks for debugging
+                    const chunkRanges = diffFile.chunks.map(chunk => {
+                        return `${chunk.newStart}-${chunk.newStart + chunk.newLines - 1}`;
+                    }).join(', ');
+                    core.debug(`Available chunks in ${comment.path}: ${chunkRanges}`);
+                    // Attempt to validate line against full file content via GitHub API
+                    try {
+                        core.debug(`Attempting to validate line ${comment.line} against full file content...`);
+                        // Get the file content from GitHub to check if line is valid in full file
+                        const fileContentResponse = yield (0, retry_1.withRetry)(() => octokit.repos.getContent({
+                            owner,
+                            repo,
+                            path: comment.path,
+                            ref: commitId
+                        }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-content");
+                        if ('content' in fileContentResponse.data && fileContentResponse.data.content) {
+                            const fileContent = Buffer.from(fileContentResponse.data.content, 'base64').toString('utf8');
+                            const fileLines = fileContent.split('\n');
+                            if (comment.line <= fileLines.length) {
+                                core.info(`Line ${comment.line} exists in full file (outside diff chunks) - keeping comment`);
+                                // Adjust comment to point to a valid line in the diff if possible
+                                const nearestChunk = diffFile.chunks
+                                    .map(chunk => ({
+                                    chunk,
+                                    start: chunk.newStart,
+                                    end: chunk.newStart + chunk.newLines - 1,
+                                    distance: Math.min(Math.abs(comment.line - chunk.newStart), Math.abs(comment.line - (chunk.newStart + chunk.newLines - 1)))
+                                }))
+                                    .sort((a, b) => a.distance - b.distance)[0];
+                                if (nearestChunk) {
+                                    core.info(`Adjusting line ${comment.line} to ${nearestChunk.start} (nearest valid line in diff chunk)`);
+                                    // Create an adjusted copy of the comment
+                                    const adjustedComment = Object.assign(Object.assign({}, comment), { line: nearestChunk.start, body: `**Note: This comment was originally for line ${comment.line} but was adjusted to fit in the viewable diff.**\n\n${comment.body}` });
+                                    return adjustedComment;
+                                }
+                            }
+                            else {
+                                core.debug(`Line ${comment.line} exceeds file length (${fileLines.length} lines) - skipping comment`);
+                            }
+                        }
+                    }
+                    catch (error) {
+                        core.debug(`Failed to validate line against full file content: ${error instanceof Error ? error.message : String(error)}`);
+                    }
+                    return null;
                 }
                 // Validate other aspects
                 if (typeof comment.line !== 'number' || comment.line <= 0) {
                     core.warning(`Invalid line number ${comment.line} for file ${comment.path} - skipping comment`);
-                    return false;
+                    return null;
                 }
                 if (!comment.body || comment.body.trim() === "") {
                     core.warning(`Empty comment body at line ${comment.line} for file ${comment.path} - skipping comment`);
-                    return false;
+                    return null;
                 }
-                return true;
-            });
-            if (validatedComments.length === 0) {
+                core.debug(`Validated comment at ${comment.path}:${comment.line} - valid`);
+                return comment;
+            })));
+            // Filter out null values from the validated comments
+            const filteredComments = validatedComments.filter(comment => comment !== null);
+            if (filteredComments.length === 0) {
                 core.warning("No valid comments after enhanced validation");
+                if (comments.length > 0) {
+                    core.debug(`All ${comments.length} comments were filtered out during validation`);
+                    // Log a preview of the first few invalid comments
+                    const MAX_PREVIEW = 3;
+                    comments.slice(0, MAX_PREVIEW).forEach((comment, idx) => {
+                        core.debug(`Invalid comment ${idx + 1}: ${JSON.stringify(comment)}`);
+                    });
+                    if (comments.length > MAX_PREVIEW) {
+                        core.debug(`...and ${comments.length - MAX_PREVIEW} more invalid comments`);
+                    }
+                }
                 return;
             }
             // Process comments in batches with improved error handling
             const BATCH_SIZE = 10;
             const batches = [];
-            for (let i = 0; i < validatedComments.length; i += BATCH_SIZE) {
-                batches.push(validatedComments.slice(i, i + BATCH_SIZE));
+            for (let i = 0; i < filteredComments.length; i += BATCH_SIZE) {
+                batches.push(filteredComments.slice(i, i + BATCH_SIZE));
             }
             let successCount = 0;
             let failureCount = 0;
@@ -1112,11 +1382,41 @@ function createReviewComment(owner, repo, pull_number, comments) {
                     failedComments.push(...batch);
                     const errorMessage = error instanceof Error ? error.message : String(error);
                     core.warning(`Failed to create batch of ${batch.length} comments: ${errorMessage}`);
+                    // Log more detailed info only for debug logs
+                    if (error instanceof Error) {
+                        // Log the full error details to debug
+                        core.debug(`Full error details: ${JSON.stringify({
+                            name: error.name,
+                            message: error.message,
+                            stack: error.stack
+                        }, null, 2)}`);
+                        // Log the request details that caused the failure
+                        const errorObj = error;
+                        if (errorObj.request) {
+                            core.debug(`Request method: ${errorObj.request.method}`);
+                            core.debug(`Request path: ${errorObj.request.path}`);
+                        }
+                        // Log the response details if available
+                        if (errorObj.response) {
+                            core.debug(`Response status: ${errorObj.response.status}`);
+                            core.debug(`Response headers: ${JSON.stringify(errorObj.response.headers || {})}`);
+                            core.debug(`Response data: ${JSON.stringify(errorObj.response.data || {}, null, 2)}`);
+                        }
+                    }
                     // Try to extract the invalid comment from the error message
                     if (errorMessage.includes("path is invalid") ||
                         errorMessage.includes("line number") ||
                         errorMessage.includes("diff hunk")) {
                         core.warning("Attempting to identify and remove problematic comments for future batches");
+                        // Log the current batch that failed for debugging
+                        core.debug(`Failed batch comments: ${JSON.stringify(batch.map(comment => {
+                            var _a;
+                            return ({
+                                path: comment.path,
+                                line: comment.line,
+                                bodyLength: ((_a = comment.body) === null || _a === void 0 ? void 0 : _a.length) || 0
+                            });
+                        }), null, 2)}`);
                     }
                 }
             }

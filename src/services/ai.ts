@@ -34,6 +34,9 @@ export function createPrompt(file: File, chunk: Chunk, prDetails: { title: strin
   const filePath = file.to || file.from || 'unknown';
   const language = getLanguageFromPath(filePath);
   
+  // Log condensed chunk info rather than full content
+  core.debug(`Creating prompt for ${filePath} (${language}): chunk with ${chunk.changes.length} changes, newLines=${chunk.newLines}, oldLines=${chunk.oldLines}`);
+  
   // Create a context-aware prompt
   const prompt = `Review the following code changes in ${language} file '${filePath}':
 
@@ -175,6 +178,9 @@ async function getOpenAIResponse(prompt: string, chunk?: Chunk): Promise<AIRespo
       "openai-api"
     );
 
+    // Minimal logging during normal operation - only log essential details
+    core.debug(`OpenAI response: model=${response.model}, finish_reason=${response.choices[0]?.finish_reason}, content_length=${response.choices[0]?.message?.content?.length || 0}`);
+
     const content = response.choices[0].message?.content?.trim();
     
     if (!content) {
@@ -194,11 +200,36 @@ async function getOpenAIResponse(prompt: string, chunk?: Chunk): Promise<AIRespo
       
       return validReviews;
     } catch (parseError) {
+      // In case of error, log more detailed information including content
       core.error(`Failed to parse OpenAI response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+      
+      // Log the full response details for debugging when there's an error
+      core.debug(`Full OpenAI response details: ${JSON.stringify({
+        id: response.id,
+        object: response.object,
+        model: response.model,
+        created: response.created,
+        choices: response.choices.map(c => ({
+          index: c.index,
+          finish_reason: c.finish_reason,
+          content_length: c.message?.content?.length || 0
+        }))
+      }, null, 2)}`);
+      
+      // Log the raw content that failed to parse - only a limited preview in normal logs
+      const previewLength = 200;
+      core.error(`Content preview (${content.length} chars): ${content.substring(0, previewLength)}${content.length > previewLength ? '...' : ''}`);
+      
+      // But log full content in debug for troubleshooting
+      core.debug(`Full content that failed to parse (${content.length} chars): ${content}`);
       
       // Attempt to salvage JSON if it's truncated
       try {
         core.debug("Attempting to salvage truncated JSON response...");
+        
+        // Log the content length
+        core.debug(`Content length: ${content.length} characters`);
+        
         // Try to find the last complete review object without using 's' flag
         const contentNoNewlines = content.replace(/\n/g, ' ');
         const lastCompleteReviewMatch = contentNoNewlines.match(/"reviews"\s*:\s*\[\s*(.*?)(\}\s*\]|\}\s*,\s*\{)/);
@@ -206,11 +237,43 @@ async function getOpenAIResponse(prompt: string, chunk?: Chunk): Promise<AIRespo
         if (lastCompleteReviewMatch && lastCompleteReviewMatch[1]) {
           // Create a valid JSON structure with just the first complete review
           const salvaged = `{"reviews":[${lastCompleteReviewMatch[1]}]}`;
+          core.debug(`Salvaged JSON attempt: ${salvaged}`);
+          
           const parsedSalvaged = JSON.parse(salvaged);
           
           if (parsedSalvaged.reviews && parsedSalvaged.reviews.length > 0) {
             core.info(`Salvaged ${parsedSalvaged.reviews.length} reviews from truncated JSON`);
+            
+            // Log each salvaged review
+            parsedSalvaged.reviews.forEach((review: any, idx: number) => {
+              core.debug(`Salvaged review ${idx+1}: ${JSON.stringify(review)}`);
+            });
+            
             return parsedSalvaged.reviews.filter(validateAIResponse);
+          }
+        }
+        
+        // Try another approach - look for complete objects in array
+        const objectMatches = content.match(/\{[^{}]*\}/g);
+        if (objectMatches && objectMatches.length > 0) {
+          core.debug(`Found ${objectMatches.length} potential JSON objects in response`);
+          
+          // Try to parse each one
+          const validObjects = [];
+          for (const objStr of objectMatches) {
+            try {
+              const obj = JSON.parse(objStr);
+              if (obj && typeof obj === 'object' && validateAIResponse(obj)) {
+                validObjects.push(obj);
+              }
+            } catch (e) {
+              // Ignore parsing errors for individual objects
+            }
+          }
+          
+          if (validObjects.length > 0) {
+            core.info(`Salvaged ${validObjects.length} review objects directly from content`);
+            return validObjects;
           }
         }
       } catch (salvageError) {
@@ -275,6 +338,13 @@ async function getAnthropicResponse(prompt: string): Promise<AIResponseArray | n
       "anthropic-api"
     );
 
+    // Minimal logging during normal operation
+    const contentBlocks = response.content?.filter(block => block.type === 'text') || [];
+    const totalLength = contentBlocks.reduce((sum, block) => 
+      sum + ('text' in block ? block.text.length : 0), 0);
+    
+    core.debug(`Anthropic response: model=${response.model}, stop_reason=${response.stop_reason}, content_blocks=${contentBlocks.length}, total_length=${totalLength}`);
+
     // Process the content blocks from the response
     let textContent = "";
     
@@ -305,7 +375,26 @@ async function getAnthropicResponse(prompt: string): Promise<AIResponseArray | n
       
       return validReviews;
     } catch (parseError) {
+      // In case of error, log more detailed information
       core.error(`Failed to parse Anthropic response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+      
+      // Log more details about the response in debug when there's an error
+      core.debug(`Full Anthropic response details: ${JSON.stringify({
+        id: response.id,
+        model: response.model,
+        stop_reason: response.stop_reason,
+        stop_sequence: response.stop_sequence,
+        usage: response.usage,
+        content_blocks: response.content?.length || 0
+      }, null, 2)}`);
+      
+      // Log content preview in error logs
+      const previewLength = 200;
+      core.error(`Content preview (${textContent.length} chars): ${textContent.substring(0, previewLength)}${textContent.length > previewLength ? '...' : ''}`);
+      
+      // Full content in debug logs
+      core.debug(`Full content that failed to parse (${textContent.length} chars): ${textContent}`);
+      
       return null;
     }
   } catch (error) {
@@ -316,7 +405,8 @@ async function getAnthropicResponse(prompt: string): Promise<AIResponseArray | n
       const errorObj = error as any;
       if (errorObj.response) {
         core.error(`API Response Status: ${errorObj.response.status}`);
-        core.error(`API Response Data: ${JSON.stringify(errorObj.response.data || {})}`);
+        core.debug(`API Response Headers: ${JSON.stringify(errorObj.response.headers || {})}`);
+        core.debug(`API Response Data: ${JSON.stringify(errorObj.response.data || {}, null, 2)}`);
       }
       if (errorObj.status) {
         core.error(`API Status: ${errorObj.status}`);
@@ -335,14 +425,57 @@ async function getAnthropicResponse(prompt: string): Promise<AIResponseArray | n
  */
 export function createComment(file: File, chunk: Chunk, aiResponse: AIReviewResponse): ReviewComment | null {
   if (!file.to) {
+    core.debug(`Cannot create comment: File path is missing in the diff`);
+    return null;
+  }
+
+  // Validate AI response
+  if (!aiResponse || typeof aiResponse !== 'object') {
+    core.error(`Invalid AI response format: ${JSON.stringify(aiResponse)}`);
     return null;
   }
 
   // Validate the line number is within the chunk's range
   const lineNumber = Number(aiResponse.lineNumber);
-  if (isNaN(lineNumber) || lineNumber < chunk.newStart || lineNumber > chunk.newStart + chunk.newLines - 1) {
-    core.warning(`Invalid line number ${lineNumber} for chunk starting at ${chunk.newStart}`);
+  if (isNaN(lineNumber)) {
+    core.error(`Invalid line number format in AI response: ${aiResponse.lineNumber}`);
+    core.debug(`Full AI response: ${JSON.stringify(aiResponse, null, 2)}`);
     return null;
+  }
+
+  // Check if line number is outside chunk range
+  if (lineNumber < chunk.newStart || lineNumber > chunk.newStart + chunk.newLines - 1) {
+    core.warning(`Invalid line number ${lineNumber} for chunk starting at ${chunk.newStart}`);
+    core.debug(`Chunk details: start=${chunk.newStart}, lines=${chunk.newLines}, end=${chunk.newStart + chunk.newLines - 1}`);
+    core.debug(`Full AI response: ${JSON.stringify(aiResponse, null, 2)}`);
+    
+    // FOR SALVAGING INVALID LINE COMMENTS: Adjust the line number to fit within the chunk range
+    // Instead of discarding, fix the line number to be within the valid range
+    const adjustedLineNumber = Math.min(Math.max(lineNumber, chunk.newStart), chunk.newStart + chunk.newLines - 1);
+    
+    core.info(`Adjusting line number from ${lineNumber} to ${adjustedLineNumber} to fit within valid range`);
+    
+    // Format the comment body to properly handle code suggestions
+    let formattedComment = `**Note: This comment was originally for line ${lineNumber} but was adjusted to fit in the viewable diff.**\n\n${aiResponse.reviewComment}`;
+    
+    // If the comment contains code suggestions, format them properly
+    const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+    if (codeBlockRegex.test(formattedComment)) {
+      // Replace code blocks with properly formatted ones
+      formattedComment = formattedComment.replace(codeBlockRegex, (match, lang, code) => {
+        // If no language is specified, try to detect it from the file extension
+        const language = lang || getLanguageFromPath(file.to || '').toLowerCase();
+        return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
+      });
+    }
+
+    // Create adjusted comment
+    return {
+      path: file.to,
+      line: adjustedLineNumber,
+      body: formattedComment,
+      side: 'RIGHT' as const
+    };
   }
 
   // Format the comment body to properly handle code suggestions

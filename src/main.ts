@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import parseDiff, { File, Chunk } from "parse-diff";
+import parseDiff, { File, Chunk, Change } from "parse-diff";
 import minimatch from "minimatch";
 import { ReviewComment, PRDetails } from "./types";
 import { 
@@ -114,27 +114,87 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
   const comments: ReviewComment[] = [];
   core.debug(`File has ${file.chunks.length} chunks to process`);
   
-  // Merge small chunks together
+  // Improve chunk merging strategy to handle line number context better
   const mergedChunks: Chunk[] = [];
   let currentChunk: Chunk | null = null;
   
-  for (const chunk of file.chunks) {
+  // First, analyze the full file chunk distribution
+  const chunkDistribution = file.chunks.map(chunk => ({
+    start: chunk.newStart,
+    end: chunk.newStart + chunk.newLines - 1,
+    lines: chunk.newLines + chunk.oldLines,
+    chunk
+  }));
+  
+  core.debug(`Chunk distribution in file: ${JSON.stringify(chunkDistribution.map(c => 
+    ({ start: c.start, end: c.end, lines: c.lines })))}`);
+  
+  // Check for large gaps between chunks
+  const hasLargeGaps = chunkDistribution.some((chunk, idx) => {
+    if (idx === 0) return false;
+    const prevChunk = chunkDistribution[idx - 1];
+    const gap = chunk.start - (prevChunk.end + 1);
+    return gap > 100; // Consider gaps > 100 lines to be large
+  });
+  
+  if (hasLargeGaps) {
+    core.info(`File ${filePath} has large gaps between chunks, using cautious merging strategy`);
+  }
+  
+  // Merge chunks with better context awareness
+  for (let i = 0; i < file.chunks.length; i++) {
+    const chunk = file.chunks[i];
+    
     if (!currentChunk) {
       currentChunk = { ...chunk };
-    } else {
-      // If the current chunk is small and the next chunk is small, merge them
-      const currentTotalLines = currentChunk.newLines + currentChunk.oldLines;
-      const nextTotalLines = chunk.newLines + chunk.oldLines;
+      continue;
+    }
+    
+    const currentEnd = currentChunk.newStart + currentChunk.newLines - 1;
+    const nextStart = chunk.newStart;
+    const gap = nextStart - (currentEnd + 1);
+    
+    // Decide whether to merge based on several factors
+    const currentTotalLines = currentChunk.newLines + currentChunk.oldLines;
+    const nextTotalLines = chunk.newLines + chunk.oldLines;
+    const mergedWouldBeTooLarge = (currentTotalLines + nextTotalLines) > MAX_CHUNK_TOTAL_LINES * 0.8;
+    const gapIsTooLarge = gap > 50; // Don't merge chunks with more than 50 lines between them
+    
+    if (!mergedWouldBeTooLarge && !gapIsTooLarge) {
+      // Calculate virtual lines for the gap
+      const virtualGapChanges: Change[] = [];
       
-      if (currentTotalLines < 200 && nextTotalLines < 200) {
-        // Merge chunks
-        currentChunk.newLines += chunk.newLines;
-        currentChunk.oldLines += chunk.oldLines;
-        currentChunk.changes = [...currentChunk.changes, ...chunk.changes];
-      } else {
-        // Add current chunk and start a new one
-        mergedChunks.push(currentChunk);
-        currentChunk = { ...chunk };
+      // Only add virtual context lines if there is an actual gap
+      if (gap > 0) {
+        // Add up to 5 context lines to help with continuity
+        const contextLines = Math.min(gap, 5);
+        for (let j = 0; j < contextLines; j++) {
+          virtualGapChanges.push({
+            type: 'normal',
+            content: `// Context line ${j+1} of ${contextLines}`,
+            normal: true
+          } as Change);
+        }
+      }
+      
+      // Merge the chunks with any virtual context
+      currentChunk.newLines = (chunk.newStart + chunk.newLines) - currentChunk.newStart;
+      currentChunk.oldLines += chunk.oldLines;
+      currentChunk.changes = [
+        ...currentChunk.changes,
+        ...virtualGapChanges,
+        ...chunk.changes
+      ];
+    } else {
+      // Don't merge - add current chunk and start a new one
+      mergedChunks.push(currentChunk);
+      currentChunk = { ...chunk };
+      
+      if (mergedWouldBeTooLarge) {
+        core.debug(`Not merging chunks: combined size would exceed threshold (${currentTotalLines + nextTotalLines} lines)`);
+      }
+      if (gapIsTooLarge) {
+        core.debug(`Not merging chunks: gap too large (${gap} lines between chunks)`);
       }
     }
   }
@@ -144,11 +204,19 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
     mergedChunks.push(currentChunk);
   }
   
-  core.debug(`Merged ${file.chunks.length} chunks into ${mergedChunks.length} chunks`);
+  core.debug(`Merged ${file.chunks.length} chunks into ${mergedChunks.length} chunks for file ${filePath}`);
+  
+  // Log the merged chunk distribution for debugging
+  mergedChunks.forEach((chunk, idx) => {
+    core.debug(`Merged chunk #${idx+1}: lines ${chunk.newStart}-${chunk.newStart + chunk.newLines - 1} (${chunk.newLines + chunk.oldLines} total lines)`);
+  });
   
   for (let i = 0; i < mergedChunks.length; i++) {
     const chunk = mergedChunks[i];
     core.debug(`Processing chunk ${i+1}/${mergedChunks.length}: lines ${chunk.newStart}-${chunk.newStart + chunk.newLines - 1}`);
+    
+    // Log more details about chunk content
+    core.debug(`Chunk content preview: ${JSON.stringify(chunk.changes.slice(0, 3))}`);
     
     if (isChunkTooLarge(chunk)) {
       core.info(`Skipping chunk ${i+1} in ${filePath}: Chunk exceeds size limits`);
@@ -164,6 +232,12 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
     // Create a prompt for the AI
     const prompt = createPrompt(file, chunk, prDetails);
     
+    // Log prompt summary instead of full content
+    const promptPreview = prompt.length > 100 
+      ? prompt.substring(0, 100) + `... (total length: ${prompt.length} chars)`
+      : prompt;
+    core.debug(`Prompt preview for chunk ${i+1}: ${promptPreview}`);
+    
     // Get AI response
     core.debug(`Sending chunk ${i+1} to AI for review`);
     const aiResponses = await getAIResponse(prompt, chunk, prDetails);
@@ -175,6 +249,23 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
 
     core.info(`Received ${aiResponses.length} comments from AI for chunk ${i+1} in ${filePath}`);
     
+    // Log some details about the AI responses for debugging
+    if (aiResponses.length > 0) {
+      core.debug(`AI response preview: ${JSON.stringify(aiResponses.slice(0, 1))}`);
+      
+      // Check for potentially problematic line numbers ahead of time
+      const invalidLineNums = aiResponses.filter(r => {
+        const lineNumber = Number(r.lineNumber);
+        return isNaN(lineNumber) || lineNumber < chunk.newStart || lineNumber > chunk.newStart + chunk.newLines - 1;
+      });
+      
+      if (invalidLineNums.length > 0) {
+        core.warning(`Found ${invalidLineNums.length} responses with potentially invalid line numbers`);
+        core.debug(`First invalid response: ${JSON.stringify(invalidLineNums[0])}`);
+        core.debug(`Chunk range: ${chunk.newStart} to ${chunk.newStart + chunk.newLines - 1}`);
+      }
+    }
+    
     // Process each AI response and create comments
     for (const response of aiResponses) {
       const comment = createComment(file, chunk, response);
@@ -183,7 +274,8 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
         core.debug(`Added comment at line ${comment.line} in ${comment.path}`);
         comments.push(comment);
       } else {
-        core.debug(`Failed to create comment for line ${response.lineNumber} (invalid or out of range)`);
+        core.error(`Failed to create comment for line ${response.lineNumber} in ${file.to}`);
+        core.debug(`Response that failed: ${JSON.stringify(response)}`);
       }
     }
   }
@@ -301,6 +393,11 @@ export async function main() {
 - Chunk Size Limits: ${MAX_CHUNK_TOTAL_LINES} lines
 - File Size Limits: ${MAX_FILE_TOTAL_LINES} lines`);
     
+    // Add log file path for debugging
+    if (process.env.RUNNER_DEBUG === '1') {
+      core.info(`Debug mode enabled - full logs will be captured`);
+    }
+    
     // Validate configuration
     validateConfig();
     
@@ -392,11 +489,33 @@ export async function main() {
   } catch (error) {
     const duration = (Date.now() - startTime) / 1000;
     core.error(`AI code review failed after ${duration.toFixed(2)} seconds`);
-    core.setFailed(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
     
-    // Log stack trace for debugging
-    if (error instanceof Error && error.stack) {
-      core.debug(`Stack trace: ${error.stack}`);
+    // Enhanced error logging
+    if (error instanceof Error) {
+      core.setFailed(`Action failed: ${error.message}`);
+      // Log complete error details for debugging
+      core.debug(`Error name: ${error.name}`);
+      core.debug(`Error message: ${error.message}`);
+      
+      if (error.stack) {
+        core.debug(`Stack trace: ${error.stack}`);
+      }
+      
+      // Log additional error properties
+      const errorObj = error as any;
+      if (errorObj.response) {
+        core.debug(`API Response Status: ${errorObj.response.status}`);
+        core.debug(`API Response Headers: ${JSON.stringify(errorObj.response.headers || {})}`);
+        core.debug(`API Response Data: ${JSON.stringify(errorObj.response.data || {}, null, 2)}`);
+      }
+      
+      // If there's a cause, log it too
+      if (errorObj.cause) {
+        core.debug(`Error cause: ${JSON.stringify(errorObj.cause, null, 2)}`);
+      }
+    } else {
+      core.setFailed(`Action failed: ${String(error)}`);
+      core.debug(`Full error object: ${JSON.stringify(error, null, 2)}`);
     }
   }
 }
