@@ -1,6 +1,110 @@
 require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
+/***/ 6730:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.LANGUAGE_MAP = exports.MAX_FILE_TOTAL_LINES = exports.MAX_CHUNK_TOTAL_LINES = exports.RATE_LIMIT_DELAY = exports.TOKEN_MULTIPLIER = exports.MAX_CHUNK_SIZE_FOR_DEFAULT_TOKENS = exports.DEFAULT_MAX_TOKENS = exports.MAX_RETRY_DELAY = exports.RETRY_DELAY = exports.MAX_RETRIES = exports.EXCLUDE_PATTERNS = exports.MAX_FILES = exports.GITHUB_TOKEN = exports.ANTHROPIC_API_MODEL = exports.ANTHROPIC_API_KEY = exports.OPENAI_API_MODEL = exports.OPENAI_API_KEY = exports.AI_PROVIDER = void 0;
+const core = __importStar(__nccwpck_require__(2186));
+// AI Provider Configuration
+exports.AI_PROVIDER = core.getInput("AI_PROVIDER") || "openai";
+exports.OPENAI_API_KEY = core.getInput("OPENAI_API_KEY");
+exports.OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL") || "o3-mini";
+exports.ANTHROPIC_API_KEY = core.getInput("ANTHROPIC_API_KEY");
+exports.ANTHROPIC_API_MODEL = core.getInput("ANTHROPIC_API_MODEL") || "claude-3-7-sonnet-20250219";
+// GitHub Configuration
+exports.GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
+exports.MAX_FILES = parseInt(core.getInput("MAX_FILES") || "0", 10);
+exports.EXCLUDE_PATTERNS = core
+    .getInput("exclude")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+// Retry Configuration
+exports.MAX_RETRIES = 3;
+exports.RETRY_DELAY = 1000; // 1 second
+exports.MAX_RETRY_DELAY = 30000; // 30 seconds maximum delay
+// Token Configuration
+exports.DEFAULT_MAX_TOKENS = 2500;
+exports.MAX_CHUNK_SIZE_FOR_DEFAULT_TOKENS = 500; // lines
+exports.TOKEN_MULTIPLIER = 3; // Increase tokens by 3x for large chunks
+// Rate Limiting and Memory Management
+exports.RATE_LIMIT_DELAY = 1000; // 1 second between API calls
+exports.MAX_CHUNK_TOTAL_LINES = 2000; // Skip chunks larger than this
+exports.MAX_FILE_TOTAL_LINES = 5000; // Skip files larger than this
+// Language Mapping
+exports.LANGUAGE_MAP = {
+    'js': 'JavaScript',
+    'jsx': 'React',
+    'ts': 'TypeScript',
+    'tsx': 'React TypeScript',
+    'py': 'Python',
+    'java': 'Java',
+    'cpp': 'C++',
+    'c': 'C',
+    'cs': 'C#',
+    'go': 'Go',
+    'rb': 'Ruby',
+    'php': 'PHP',
+    'swift': 'Swift',
+    'kt': 'Kotlin',
+    'rs': 'Rust',
+    'scala': 'Scala',
+    'r': 'R',
+    'm': 'Objective-C',
+    'mm': 'Objective-C++',
+    'h': 'C/C++ Header',
+    'hpp': 'C++ Header',
+    'sh': 'Shell',
+    'bash': 'Bash',
+    'zsh': 'Zsh',
+    'fish': 'Fish',
+    'sql': 'SQL',
+    'html': 'HTML',
+    'css': 'CSS',
+    'scss': 'SCSS',
+    'less': 'Less',
+    'json': 'JSON',
+    'yaml': 'YAML',
+    'yml': 'YAML',
+    'toml': 'TOML',
+    'md': 'Markdown',
+    'rst': 'reStructuredText',
+    'tex': 'LaTeX',
+    'vue': 'Vue',
+    'svelte': 'Svelte',
+    'astro': 'Astro',
+};
+
+
+/***/ }),
+
 /***/ 3109:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -43,308 +147,411 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.main = void 0;
-const fs_1 = __nccwpck_require__(7147);
 const core = __importStar(__nccwpck_require__(2186));
-const openai_1 = __importDefault(__nccwpck_require__(47));
-const rest_1 = __nccwpck_require__(5375);
 const parse_diff_1 = __importDefault(__nccwpck_require__(4833));
 const minimatch_1 = __importDefault(__nccwpck_require__(2002));
-const sdk_1 = __importDefault(__nccwpck_require__(1410));
+const config_1 = __nccwpck_require__(6730);
+const utils_1 = __nccwpck_require__(1606);
+const github_1 = __nccwpck_require__(9481);
+const ai_1 = __nccwpck_require__(9161);
 // Constants for configuration
 const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
-const AI_PROVIDER = core.getInput("AI_PROVIDER") || "openai"; // Default to OpenAI if not specified
-const OPENAI_API_KEY = core.getInput("OPENAI_API_KEY");
-const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL") || "o3-mini";
-const ANTHROPIC_API_KEY = core.getInput("ANTHROPIC_API_KEY");
-const ANTHROPIC_API_MODEL = core.getInput("ANTHROPIC_API_MODEL") || "claude-3-7-sonnet-20250219"; // Latest model
-const MAX_FILES = parseInt(core.getInput("MAX_FILES") || "0", 10); // 0 means no limit
-const EXCLUDE_PATTERNS = core
-    .getInput("exclude")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean); // Filter out empty strings
-// Add retry configuration
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 1000; // 1 second
-// Add token configuration
-const DEFAULT_MAX_TOKENS = 1500;
-const MAX_CHUNK_SIZE_FOR_DEFAULT_TOKENS = 500; // lines
-const TOKEN_MULTIPLIER = 3; // Increase tokens by 3x for large chunks
-// Add rate limiting and memory management configuration
-const RATE_LIMIT_DELAY = 1000; // 1 second between API calls
-const MAX_CHUNK_TOTAL_LINES = 2000; // Skip chunks larger than this
-const MAX_FILE_TOTAL_LINES = 5000; // Skip files larger than this
-const API_CALL_QUEUE = new Map(); // Track last API call time
-// Initialize clients
-const octokit = new rest_1.Octokit({ auth: GITHUB_TOKEN });
-const openai = new openai_1.default({
-    apiKey: OPENAI_API_KEY,
-});
-const anthropic = new sdk_1.default({
-    apiKey: ANTHROPIC_API_KEY,
-});
-// Add validation function for AI responses
-function validateAIResponse(response) {
-    // Validate line number is a positive integer
-    const lineNumber = Number(response.lineNumber);
-    if (isNaN(lineNumber) || lineNumber <= 0) {
-        core.warning(`Invalid line number in AI response: ${response.lineNumber}`);
-        return false;
-    }
-    // Validate review comment is not empty and has reasonable length
-    if (!response.reviewComment || response.reviewComment.trim().length === 0) {
-        core.warning('Empty review comment received from AI');
-        return false;
-    }
-    if (response.reviewComment.length > 65536) { // GitHub's max comment length
-        core.warning('Review comment exceeds GitHub\'s maximum length');
-        return false;
-    }
-    return true;
-}
 /**
- * Helper function to delay execution
+ * Filters files based on exclude patterns
+ * Removes files that match any of the exclude patterns specified in configuration
+ *
+ * @param parsedDiff - Array of files from the parsed diff
+ * @returns Filtered array of files
  */
-function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-/**
- * Adds rate limiting to API calls
- */
-function withRateLimit(operation, apiName) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const now = Date.now();
-        const lastCallTime = API_CALL_QUEUE.get(apiName) || 0;
-        const timeToWait = Math.max(0, lastCallTime + RATE_LIMIT_DELAY - now);
-        if (timeToWait > 0) {
-            core.debug(`Rate limiting: Waiting ${timeToWait}ms before calling ${apiName}`);
-            yield delay(timeToWait);
+function filterFiles(parsedDiff) {
+    if (config_1.EXCLUDE_PATTERNS.length === 0) {
+        core.debug('No exclude patterns specified, skipping file filtering');
+        return parsedDiff;
+    }
+    core.info(`Filtering files with exclude patterns: ${config_1.EXCLUDE_PATTERNS.join(', ')}`);
+    const originalCount = parsedDiff.length;
+    const filtered = parsedDiff.filter((file) => {
+        if (!file.to) {
+            core.debug(`Skipping file without path (probably deleted): ${file.from || 'unknown'}`);
+            return false;
         }
-        API_CALL_QUEUE.set(apiName, Date.now());
-        return operation();
+        const shouldExclude = config_1.EXCLUDE_PATTERNS.some((pattern) => (0, minimatch_1.default)(file.to, pattern));
+        if (shouldExclude) {
+            core.debug(`Excluding file: ${file.to} (matched exclude pattern)`);
+        }
+        return !shouldExclude;
     });
+    const excludedCount = originalCount - filtered.length;
+    if (excludedCount > 0) {
+        core.info(`Excluded ${excludedCount} files based on patterns`);
+    }
+    return filtered;
 }
 /**
- * Helper function to retry an async operation
+ * Validates the configuration based on the selected AI provider
+ * Ensures required API keys are present and logs the active configuration
+ *
+ * @throws Error if required API keys are missing
  */
-function withRetry(operation, maxRetries = MAX_RETRIES, delayMs = RETRY_DELAY, apiName) {
+function validateConfig() {
+    core.debug('Validating configuration...');
+    if (config_1.AI_PROVIDER.toLowerCase() === "anthropic") {
+        if (!config_1.ANTHROPIC_API_KEY) {
+            const error = "ANTHROPIC_API_KEY is required when using Anthropic as the AI provider";
+            core.error(error);
+            throw new Error(error);
+        }
+        core.info(`Using Anthropic as AI provider with model: ${config_1.ANTHROPIC_API_MODEL}`);
+    }
+    else {
+        // Default to OpenAI
+        if (!config_1.OPENAI_API_KEY) {
+            const error = "OPENAI_API_KEY is required when using OpenAI as the AI provider";
+            core.error(error);
+            throw new Error(error);
+        }
+        core.info(`Using OpenAI as AI provider with model: ${config_1.OPENAI_API_MODEL}`);
+    }
+    if (!GITHUB_TOKEN) {
+        const error = "GITHUB_TOKEN is required for accessing GitHub API";
+        core.error(error);
+        throw new Error(error);
+    }
+    core.debug('Configuration validation successful');
+}
+/**
+ * Processes a file's diff and generates review comments
+ * Breaks down the file into chunks and processes each chunk individually
+ *
+ * @param file - The file to process
+ * @param prDetails - Pull request details
+ * @returns Array of review comments
+ */
+function processFile(file, prDetails) {
     return __awaiter(this, void 0, void 0, function* () {
-        let lastError = null;
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                // Add rate limiting if apiName is provided
-                if (apiName) {
-                    return yield withRateLimit(() => operation(), apiName);
+        const filePath = file.to || file.from || 'unknown';
+        core.debug(`Beginning to process file: ${filePath}`);
+        if ((0, utils_1.isFileTooLarge)(file)) {
+            core.info(`Skipping file ${filePath}: File exceeds size limits`);
+            return [];
+        }
+        const comments = [];
+        core.debug(`File has ${file.chunks.length} chunks to process`);
+        for (let i = 0; i < file.chunks.length; i++) {
+            const chunk = file.chunks[i];
+            core.debug(`Processing chunk ${i + 1}/${file.chunks.length}: lines ${chunk.newStart}-${chunk.newStart + chunk.newLines - 1}`);
+            if ((0, utils_1.isChunkTooLarge)(chunk)) {
+                core.info(`Skipping chunk ${i + 1} in ${filePath}: Chunk exceeds size limits`);
+                continue;
+            }
+            // Skip chunks with no new lines
+            if (chunk.newLines === 0) {
+                core.debug(`Skipping chunk ${i + 1} in ${filePath}: No new lines to review`);
+                continue;
+            }
+            // Create a prompt for the AI
+            const prompt = (0, ai_1.createPrompt)(file, chunk, prDetails);
+            // Get AI response
+            core.debug(`Sending chunk ${i + 1} to AI for review`);
+            const aiResponses = yield (0, ai_1.getAIResponse)(prompt, chunk, prDetails);
+            if (!aiResponses || aiResponses.length === 0) {
+                core.debug(`No AI review comments generated for chunk ${i + 1} in ${filePath}`);
+                continue;
+            }
+            core.info(`Received ${aiResponses.length} comments from AI for chunk ${i + 1} in ${filePath}`);
+            // Process each AI response
+            for (const response of aiResponses) {
+                core.debug(`Processing AI comment for line ${response.lineNumber}: ${response.severity}`);
+                const comment = (0, ai_1.createComment)(file, chunk, response);
+                if (comment !== null) {
+                    core.debug(`Added comment at line ${comment.line} in ${comment.path}`);
+                    comments.push(comment);
                 }
                 else {
-                    return yield operation();
-                }
-            }
-            catch (error) {
-                lastError = error instanceof Error ? error : new Error(String(error));
-                // Check for rate limiting errors and adjust delay
-                if (error instanceof Error) {
-                    const errorMsg = error.message.toLowerCase();
-                    if (errorMsg.includes('rate limit') ||
-                        errorMsg.includes('too many requests') ||
-                        errorMsg.includes('429')) {
-                        // For rate limit errors, use a longer delay
-                        delayMs = delayMs * 3;
-                        core.warning(`Rate limit detected, increasing delay to ${delayMs}ms`);
-                    }
-                }
-                if (attempt < maxRetries) {
-                    core.warning(`Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
-                    yield delay(delayMs * attempt); // Exponential backoff
+                    core.debug(`Failed to create comment for line ${response.lineNumber} (invalid or out of range)`);
                 }
             }
         }
-        throw lastError;
+        core.info(`Generated ${comments.length} comments for file ${filePath}`);
+        return comments;
     });
-}
-/**
- * Safely validates a file is within size limits
- */
-function isFileTooLarge(file) {
-    const totalLines = file.additions + file.deletions;
-    if (totalLines > MAX_FILE_TOTAL_LINES) {
-        core.warning(`Skipping file ${file.to}: Too large (${totalLines} lines)`);
-        return true;
-    }
-    return false;
-}
-/**
- * Safely validates a chunk is within size limits
- */
-function isChunkTooLarge(chunk) {
-    const totalLines = chunk.newLines + chunk.oldLines;
-    if (totalLines > MAX_CHUNK_TOTAL_LINES) {
-        core.warning(`Skipping chunk: Too large (${totalLines} lines)`);
-        return true;
-    }
-    return false;
-}
-/**
- * Fetches pull request details from GitHub
- */
-function getPRDetails() {
-    var _a, _b;
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            if (!process.env.GITHUB_EVENT_PATH) {
-                throw new Error("GITHUB_EVENT_PATH environment variable is not set");
-            }
-            const eventData = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH, "utf8"));
-            const { repository, number } = eventData;
-            if (!repository || !number) {
-                throw new Error("Invalid event data: missing repository or PR number");
-            }
-            const prResponse = yield octokit.pulls.get({
-                owner: repository.owner.login,
-                repo: repository.name,
-                pull_number: number,
-            });
-            return {
-                owner: repository.owner.login,
-                repo: repository.name,
-                pull_number: number,
-                title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
-                description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
-            };
-        }
-        catch (error) {
-            core.error(`Failed to get PR details: ${error instanceof Error ? error.message : String(error)}`);
-            throw error;
-        }
-    });
-}
-/**
- * Fetches the diff for a pull request
- */
-function getDiff(owner, repo, pull_number) {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            const response = yield octokit.pulls.get({
-                owner,
-                repo,
-                pull_number,
-                mediaType: { format: "diff" },
-            });
-            // @ts-expect-error - response.data is a string when mediaType.format is "diff"
-            return response.data;
-        }
-        catch (error) {
-            core.error(`Failed to get diff: ${error instanceof Error ? error.message : String(error)}`);
-            throw error;
-        }
-    });
-}
-/**
- * Calculates appropriate token limit based on chunk size
- */
-function calculateTokenLimit(chunk) {
-    const totalLines = chunk.newLines + chunk.oldLines;
-    if (totalLines > MAX_CHUNK_SIZE_FOR_DEFAULT_TOKENS) {
-        const multiplier = Math.ceil(totalLines / MAX_CHUNK_SIZE_FOR_DEFAULT_TOKENS);
-        return DEFAULT_MAX_TOKENS * Math.min(multiplier, TOKEN_MULTIPLIER);
-    }
-    return DEFAULT_MAX_TOKENS;
 }
 /**
  * Analyzes code diffs using AI and generates review comments
+ * Orchestrates the processing of all files in the diff, with concurrency control
+ *
+ * @param parsedDiff - Array of files from the parsed diff
+ * @param prDetails - Pull request details
+ * @returns Array of all review comments across files
  */
 function analyzeCode(parsedDiff, prDetails) {
     return __awaiter(this, void 0, void 0, function* () {
         const comments = [];
         core.info(`Analyzing ${parsedDiff.length} files...`);
         // Apply MAX_FILES limit if set
-        const filesToAnalyze = MAX_FILES > 0 ? parsedDiff.slice(0, MAX_FILES) : parsedDiff;
-        if (MAX_FILES > 0 && parsedDiff.length > MAX_FILES) {
-            core.info(`Limiting analysis to first ${MAX_FILES} files as per MAX_FILES setting`);
+        const filesToAnalyze = config_1.MAX_FILES > 0 ? parsedDiff.slice(0, config_1.MAX_FILES) : parsedDiff;
+        if (config_1.MAX_FILES > 0 && parsedDiff.length > config_1.MAX_FILES) {
+            core.info(`Limiting analysis to first ${config_1.MAX_FILES} files as per MAX_FILES setting (${parsedDiff.length - config_1.MAX_FILES} files excluded)`);
         }
+        // Track analysis stats
+        let processedFiles = 0;
+        let skippedFiles = 0;
+        let erroredFiles = 0;
+        const startTime = Date.now();
         // Process files in parallel with a concurrency limit
         const CONCURRENT_FILES = 3;
+        core.info(`Processing files with concurrency level: ${CONCURRENT_FILES}`);
         for (let i = 0; i < filesToAnalyze.length; i += CONCURRENT_FILES) {
+            const batchNumber = Math.floor(i / CONCURRENT_FILES) + 1;
+            const batchSize = Math.min(CONCURRENT_FILES, filesToAnalyze.length - i);
             const fileBatch = filesToAnalyze.slice(i, i + CONCURRENT_FILES);
+            core.info(`Processing batch ${batchNumber} with ${batchSize} files (${i + 1}-${i + batchSize} of ${filesToAnalyze.length})`);
             const fileCommentsPromises = fileBatch.map((file) => __awaiter(this, void 0, void 0, function* () {
+                const filePath = file.to || file.from || 'unknown';
                 if (file.to === "/dev/null") {
                     core.debug(`Skipping deleted file: ${file.from}`);
+                    skippedFiles++;
                     return [];
                 }
                 // Skip files that are too large
-                if (isFileTooLarge(file)) {
+                if ((0, utils_1.isFileTooLarge)(file)) {
+                    skippedFiles++;
                     return [];
                 }
                 try {
-                    core.info(`\nAnalyzing file: ${file.to}`);
+                    core.info(`\nAnalyzing file: ${filePath}`);
                     core.info(`Changes: +${file.additions} -${file.deletions} lines`);
-                    const fileComments = [];
-                    // Process chunks in parallel with a concurrency limit
-                    const CONCURRENT_CHUNKS = 2;
-                    for (let j = 0; j < file.chunks.length; j += CONCURRENT_CHUNKS) {
-                        const chunkBatch = file.chunks.slice(j, j + CONCURRENT_CHUNKS);
-                        const chunkCommentsPromises = chunkBatch.map((chunk) => __awaiter(this, void 0, void 0, function* () {
-                            // Skip chunks that are too large
-                            if (isChunkTooLarge(chunk)) {
-                                return [];
-                            }
-                            try {
-                                core.debug(`Processing chunk at lines ${chunk.oldStart},${chunk.oldLines} -> ${chunk.newStart},${chunk.newLines}`);
-                                const prompt = createPrompt(file, chunk, prDetails);
-                                core.debug('Sending prompt to AI:\n' + prompt);
-                                const aiResponse = yield getAIResponse(prompt, chunk);
-                                if (aiResponse && aiResponse.length > 0) {
-                                    core.info(`Received ${aiResponse.length} comments from AI for file ${file.to}:`);
-                                    aiResponse.forEach(response => {
-                                        core.info(`- Line ${response.lineNumber}: ${response.reviewComment}`);
-                                    });
-                                    return createComment(file, chunk, aiResponse);
-                                }
-                                else {
-                                    core.debug(`No comments generated for chunk in ${file.to}`);
-                                    return [];
-                                }
-                            }
-                            catch (error) {
-                                // Log the error but continue processing other chunks
-                                core.warning(`Error processing chunk in ${file.to}: ${error instanceof Error ? error.message : String(error)}`);
-                                return [];
-                            }
-                        }));
-                        try {
-                            const chunkComments = yield Promise.all(chunkCommentsPromises);
-                            fileComments.push(...chunkComments.flat());
-                        }
-                        catch (error) {
-                            core.warning(`Error processing chunk batch in ${file.to}: ${error instanceof Error ? error.message : String(error)}`);
-                        }
-                    }
-                    return fileComments;
+                    // Use the processFile function to handle each file
+                    return yield processFile(file, prDetails);
                 }
                 catch (error) {
                     // Log the error but continue processing other files
-                    core.warning(`Error processing file ${file.to}: ${error instanceof Error ? error.message : String(error)}`);
+                    erroredFiles++;
+                    core.warning(`Error processing file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
                     return [];
                 }
             }));
             try {
                 const fileComments = yield Promise.all(fileCommentsPromises);
-                comments.push(...fileComments.flat());
+                const batchComments = fileComments.flat();
+                core.info(`Batch ${batchNumber} complete: Generated ${batchComments.length} comments`);
+                comments.push(...batchComments);
             }
             catch (error) {
-                core.warning(`Error processing file batch: ${error instanceof Error ? error.message : String(error)}`);
+                core.warning(`Error processing file batch ${batchNumber}: ${error instanceof Error ? error.message : String(error)}`);
             }
         }
-        core.info(`\nAnalysis complete. Generated ${comments.length} comments total.`);
+        const duration = (Date.now() - startTime) / 1000;
+        core.info(`\nAnalysis complete in ${duration.toFixed(2)} seconds:`);
+        core.info(`- Processed files: ${processedFiles}`);
+        core.info(`- Skipped files: ${skippedFiles}`);
+        core.info(`- Errored files: ${erroredFiles}`);
+        core.info(`- Generated comments: ${comments.length}`);
         return comments;
     });
 }
 /**
- * Creates a prompt for the AI model to review code
+ * Main function that orchestrates the entire code review process
+ * Handles configuration, PR details, diff parsing, code analysis, and comment creation
+ */
+function main() {
+    return __awaiter(this, void 0, void 0, function* () {
+        const startTime = Date.now();
+        try {
+            core.info("=== Starting AI code review ===");
+            // Provide more detailed model information
+            const modelInfo = config_1.AI_PROVIDER === 'openai'
+                ? `${config_1.OPENAI_API_MODEL}${config_1.OPENAI_API_MODEL.startsWith('o3-') ? ' (using max_completion_tokens)' : ' (using max_tokens)'}`
+                : config_1.ANTHROPIC_API_MODEL;
+            core.info(`Configuration:
+- AI Provider: ${config_1.AI_PROVIDER}
+- Model: ${modelInfo}
+- Max Files: ${config_1.MAX_FILES > 0 ? config_1.MAX_FILES : 'No limit'}
+- Exclude Patterns: ${config_1.EXCLUDE_PATTERNS.length > 0 ? config_1.EXCLUDE_PATTERNS.join(', ') : 'None'}
+- Chunk Size Limits: ${config_1.MAX_CHUNK_TOTAL_LINES} lines
+- File Size Limits: ${config_1.MAX_FILE_TOTAL_LINES} lines`);
+            // Validate configuration
+            validateConfig();
+            // Get PR details
+            core.info("Fetching PR details...");
+            const prDetails = yield (0, github_1.getPRDetails)();
+            core.info(`Processing PR #${prDetails.pull_number} in ${prDetails.owner}/${prDetails.repo}`);
+            core.info(`PR Title: ${prDetails.title}`);
+            if (prDetails.description) {
+                core.info(`PR Description: ${prDetails.description.slice(0, 100)}${prDetails.description.length > 100 ? '...' : ''}`);
+            }
+            // Get diff
+            core.info("Fetching PR diff...");
+            const diff = yield (0, github_1.getDiff)(prDetails.owner, prDetails.repo, prDetails.pull_number);
+            if (!diff) {
+                core.info("No diff found or unsupported event");
+                return;
+            }
+            // Parse and filter diff
+            core.info("Parsing diff...");
+            const parsedDiff = (0, parse_diff_1.default)(diff);
+            core.info(`\nFound ${parsedDiff.length} changed files:`);
+            parsedDiff.forEach(file => {
+                core.info(`- ${file.to || file.from || 'unknown'} (+${file.additions} -${file.deletions})`);
+            });
+            // Summary of file types
+            const fileExtensions = new Map();
+            parsedDiff.forEach(file => {
+                const ext = (file.to || "").split('.').pop() || "unknown";
+                fileExtensions.set(ext, (fileExtensions.get(ext) || 0) + 1);
+            });
+            core.info("File types breakdown:");
+            fileExtensions.forEach((count, ext) => {
+                core.info(`- ${ext}: ${count} file(s)`);
+            });
+            // Filter files based on exclude patterns
+            const filteredDiff = filterFiles(parsedDiff);
+            core.info(`\nAnalyzing ${filteredDiff.length} files after filtering (excluded ${parsedDiff.length - filteredDiff.length})`);
+            // Analyze code and create comments
+            core.info("\n=== Starting code analysis ===");
+            const comments = yield analyzeCode(filteredDiff, prDetails);
+            // Create review if there are comments
+            if (comments.length > 0) {
+                // Group comments by file for better overview
+                const commentsByFile = new Map();
+                comments.forEach(comment => {
+                    const file = comment.path;
+                    if (!commentsByFile.has(file)) {
+                        commentsByFile.set(file, []);
+                    }
+                    commentsByFile.get(file).push(comment);
+                });
+                core.info(`\n=== Creating review with ${comments.length} comments ===`);
+                core.info("Comments by file:");
+                commentsByFile.forEach((fileComments, path) => {
+                    core.info(`- ${path}: ${fileComments.length} comment(s)`);
+                });
+                comments.forEach(comment => {
+                    const previewLength = 60;
+                    const preview = comment.body.length > previewLength ?
+                        `${comment.body.slice(0, previewLength)}...` : comment.body;
+                    core.debug(`- ${comment.path}:${comment.line} - ${preview}`);
+                });
+                core.info("\nSubmitting review to GitHub...");
+                yield (0, github_1.createReviewComment)(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+                core.info("Review successfully submitted to GitHub");
+            }
+            else {
+                core.info("\nNo comments to add. All code looks good!");
+            }
+            const duration = (Date.now() - startTime) / 1000;
+            core.info(`\n=== AI code review completed successfully in ${duration.toFixed(2)} seconds ===`);
+        }
+        catch (error) {
+            const duration = (Date.now() - startTime) / 1000;
+            core.error(`AI code review failed after ${duration.toFixed(2)} seconds`);
+            core.setFailed(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
+            // Log stack trace for debugging
+            if (error instanceof Error && error.stack) {
+                core.debug(`Stack trace: ${error.stack}`);
+            }
+        }
+    });
+}
+exports.main = main;
+// Only run the main function if this file is being run directly
+if (require.main === require.cache[eval('__filename')]) {
+    main().catch((error) => {
+        core.setFailed(`Unhandled error: ${error instanceof Error ? error.message : String(error)}`);
+        process.exit(1);
+    });
+}
+
+
+/***/ }),
+
+/***/ 9161:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createComment = exports.getAIResponse = exports.createPrompt = void 0;
+const core = __importStar(__nccwpck_require__(2186));
+const openai_1 = __importDefault(__nccwpck_require__(47));
+const sdk_1 = __importDefault(__nccwpck_require__(1410));
+const config_1 = __nccwpck_require__(6730);
+const retry_1 = __nccwpck_require__(7935);
+const utils_1 = __nccwpck_require__(1606);
+// Initialize AI clients
+const openai = new openai_1.default({
+    apiKey: config_1.OPENAI_API_KEY,
+});
+const anthropic = new sdk_1.default({
+    apiKey: config_1.ANTHROPIC_API_KEY,
+});
+/**
+ * Creates a prompt for the AI based on the file and chunk
  */
 function createPrompt(file, chunk, prDetails) {
-    return `Your task is to review pull requests. Instructions:
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
+    const filePath = file.to || file.from || 'unknown';
+    const language = (0, utils_1.getLanguageFromPath)(filePath);
+    // Create a context-aware prompt
+    const prompt = `Review the following code changes in ${language} file '${filePath}':
+
+${chunk.changes
+        .map((change) => {
+        const lineNumber = "ln" in change ? change.ln : "ln2" in change ? change.ln2 : 0;
+        return `${lineNumber}: ${change.content}`;
+    })
+        .join("\n")} and take the pull request title and description into account when writing the response.
+  
+Pull request title: ${prDetails.title}
+Pull request description:
+
+---
+${prDetails.description}
+---
+
+Analyze the code for SUBSTANTIVE issues related to:
+1. Code quality and best practices 
+2. Potential bugs or logical errors
+3. Security vulnerabilities
+4. Performance optimizations
+5. Maintainability and readability
+
+IMPORTANT: Focus ONLY on specific, actionable issues. DO NOT make generic observations about hardcoded values, presence of identifiers, or configuration entries unless they represent a concrete security risk or bug.
+DO NOT suggest "verifying" or "ensuring" values without specific technical reasons.
 - Do not give positive comments or compliments.
 - Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the comment in GitHub Markdown format.
@@ -358,78 +565,96 @@ function createPrompt(file, chunk, prDetails) {
 - Focus on actual code issues: bugs, performance issues, security concerns, and best practices.
 - Suggest specific fixes rather than just pointing out problems.
 - If suggesting a code change, provide a concrete example of the improved code.
+- IMPORTANT: Remember that you're only seeing a portion of the file and your knowledge of the codebase is limited to what's shown in this diff.
 
-Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
-  
-Pull request title: ${prDetails.title}
-Pull request description:
-
----
-${prDetails.description}
----
-
-Git diff to review:
-
-\`\`\`diff
-${chunk.content}
-${chunk.changes
-        // @ts-expect-error - ln and ln2 exists where needed
-        .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
-        .join("\n")}
-\`\`\`
-
-Remember that you're only seeing a portion of the file and your knowledge of the codebase is limited to what's shown in this diff.
-`;
+Provide your code review feedback in JSON format with the following structure:
+{
+  "reviews": [
+    {
+      "lineNumber": <line number as integer>,
+      "reviewComment": "<your specific, actionable feedback for this line>",
+      "severity": "<one of: error, warning, info>",
+      "filePath": "${filePath}"
+    },
+    ...
+  ]
+}`;
+    return prompt;
 }
+exports.createPrompt = createPrompt;
 /**
  * Gets AI response for a given prompt using the configured AI provider
  */
-function getAIResponse(prompt, chunk) {
+function getAIResponse(prompt, chunk, prDetails) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            if (AI_PROVIDER.toLowerCase() === "anthropic") {
-                return yield withRetry(() => getAnthropicResponse(prompt));
+            core.debug(`Getting AI response using provider: ${config_1.AI_PROVIDER}`);
+            if (config_1.AI_PROVIDER.toLowerCase() === "anthropic") {
+                return yield (0, retry_1.withRetry)(() => getAnthropicResponse(prompt));
             }
             else {
-                return yield withRetry(() => getOpenAIResponse(prompt, chunk));
+                return yield (0, retry_1.withRetry)(() => getOpenAIResponse(prompt, chunk));
             }
         }
         catch (error) {
-            core.error(`Error getting AI response after ${MAX_RETRIES} attempts: ${error instanceof Error ? error.message : String(error)}`);
+            core.error(`Error getting AI response after ${config_1.MAX_RETRIES} attempts: ${error instanceof Error ? error.message : String(error)}`);
+            // Log more detailed error information
+            if (error instanceof Error && error.stack) {
+                core.debug(`Error stack trace: ${error.stack}`);
+            }
             return null;
         }
     });
 }
+exports.getAIResponse = getAIResponse;
 /**
- * Gets response from OpenAI API
+ * Gets response from OpenAI API with enhanced error handling and validation
  */
 function getOpenAIResponse(prompt, chunk) {
     var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
-        // Base configuration for the API request
-        const baseConfig = {
-            model: OPENAI_API_MODEL,
+        // Check if using o3 model family and adjust parameters accordingly
+        const isOModel = config_1.OPENAI_API_MODEL.startsWith('o');
+        // Base configuration for the API request - different for o3 and other models
+        const baseConfig = isOModel ? {
+            model: config_1.OPENAI_API_MODEL,
+            max_completion_tokens: config_1.DEFAULT_MAX_TOKENS * 2,
+            response_format: { type: "json_object" }, // Using const assertion for type safety
+        } : {
+            model: config_1.OPENAI_API_MODEL,
+            temperature: 0.2,
+            max_tokens: config_1.DEFAULT_MAX_TOKENS * 2, // Double the token limit to ensure complete responses
         };
-        // Calculate token limit based on chunk size if available
-        const maxTokens = chunk ? calculateTokenLimit(chunk) : DEFAULT_MAX_TOKENS;
-        // Add model-specific parameters
-        const modelConfig = OPENAI_API_MODEL.startsWith('o')
-            ? {
-                max_completion_tokens: maxTokens,
-                response_format: { type: "json_object" }
+        // Adjust tokens based on chunk size
+        let maxTokens = config_1.DEFAULT_MAX_TOKENS;
+        if (chunk) {
+            const totalLines = chunk.newLines + chunk.oldLines;
+            if (totalLines > config_1.MAX_CHUNK_SIZE_FOR_DEFAULT_TOKENS) {
+                maxTokens = config_1.DEFAULT_MAX_TOKENS * config_1.TOKEN_MULTIPLIER;
             }
-            : Object.assign({ temperature: 0.2, top_p: 1, frequency_penalty: 0, presence_penalty: 0, max_tokens: maxTokens }, (OPENAI_API_MODEL === "gpt-4-1106-preview"
-                ? { response_format: { type: "json_object" } }
-                : {}));
+        }
         try {
-            core.debug(`Sending request to OpenAI API with model: ${OPENAI_API_MODEL} and max_tokens: ${maxTokens}`);
-            const response = yield withRetry(() => openai.chat.completions.create(Object.assign(Object.assign(Object.assign({}, baseConfig), modelConfig), { messages: [
+            core.debug(`Sending request to OpenAI API with model: ${config_1.OPENAI_API_MODEL} and ${isOModel ? 'max_completion_tokens' : 'max_tokens'}: ${maxTokens}`);
+            const updatedConfig = Object.assign({}, baseConfig);
+            // Set the appropriate token parameter based on model
+            if (isOModel) {
+                updatedConfig.max_completion_tokens = maxTokens;
+            }
+            else {
+                updatedConfig.max_tokens = maxTokens;
+                updatedConfig.temperature = 0.2;
+            }
+            core.debug(`Final OpenAI config: ${JSON.stringify(updatedConfig)}`);
+            const response = yield (0, retry_1.withRetry)(() => openai.chat.completions.create(Object.assign(Object.assign({}, updatedConfig), { messages: [
                     {
                         role: "system",
+                        content: "You are a code review assistant. Your job is to analyze code changes and provide specific, actionable feedback. Focus ONLY on substantive issues like bugs, security vulnerabilities, and performance problems. DO NOT make generic observations about hardcoded values or suggest 'verifying' configuration values without specific technical reasons.",
+                    },
+                    {
+                        role: "user",
                         content: prompt,
                     },
-                ] })), MAX_RETRIES, RETRY_DELAY, "openai-api" // Add API name for rate limiting
-            );
+                ] })), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "openai-api");
             const content = (_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim();
             if (!content) {
                 core.warning("Received empty response from OpenAI API");
@@ -439,81 +664,84 @@ function getOpenAIResponse(prompt, chunk) {
                 const parsedResponse = JSON.parse(content);
                 const reviews = parsedResponse.reviews || [];
                 // Validate each review
-                const validReviews = reviews.filter(validateAIResponse);
+                const validReviews = reviews.filter(utils_1.validateAIResponse);
                 if (validReviews.length !== reviews.length) {
                     core.warning(`Filtered out ${reviews.length - validReviews.length} invalid reviews`);
                 }
                 return validReviews;
             }
             catch (parseError) {
-                core.warning(`Failed to parse OpenAI response as JSON: ${content}`);
-                // If parsing fails, try to extract JSON from the content
-                const jsonMatch = content.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                    try {
-                        const extractedJson = JSON.parse(jsonMatch[0]);
-                        if (extractedJson.reviews) {
-                            core.info("Successfully extracted JSON from response");
-                            return extractedJson.reviews.filter(validateAIResponse);
-                        }
-                    }
-                    catch (extractError) {
-                        core.warning("Failed to extract JSON from response");
-                    }
-                }
-                // Try to extract reviews with regex as a last resort
+                core.error(`Failed to parse OpenAI response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+                // Attempt to salvage JSON if it's truncated
                 try {
-                    const reviewMatches = content.match(/"lineNumber"\s*:\s*"?([^",\s]+)"?\s*,\s*"reviewComment"\s*:\s*"([^"]+)"/g);
-                    if (reviewMatches && reviewMatches.length > 0) {
-                        core.info("Using regex to extract reviews as last resort");
-                        const extractedReviews = reviewMatches.map(match => {
-                            const lineMatch = match.match(/"lineNumber"\s*:\s*"?([^",\s]+)"?/);
-                            const commentMatch = match.match(/"reviewComment"\s*:\s*"([^"]+)"/);
-                            if (lineMatch && commentMatch) {
-                                return {
-                                    lineNumber: lineMatch[1],
-                                    reviewComment: commentMatch[1].replace(/\\"/g, '"')
-                                };
-                            }
-                            return null;
-                        }).filter(Boolean);
-                        if (extractedReviews.length > 0) {
-                            return extractedReviews.filter(validateAIResponse);
+                    core.debug("Attempting to salvage truncated JSON response...");
+                    // Try to find the last complete review object without using 's' flag
+                    const contentNoNewlines = content.replace(/\n/g, ' ');
+                    const lastCompleteReviewMatch = contentNoNewlines.match(/"reviews"\s*:\s*\[\s*(.*?)(\}\s*\]|\}\s*,\s*\{)/);
+                    if (lastCompleteReviewMatch && lastCompleteReviewMatch[1]) {
+                        // Create a valid JSON structure with just the first complete review
+                        const salvaged = `{"reviews":[${lastCompleteReviewMatch[1]}]}`;
+                        const parsedSalvaged = JSON.parse(salvaged);
+                        if (parsedSalvaged.reviews && parsedSalvaged.reviews.length > 0) {
+                            core.info(`Salvaged ${parsedSalvaged.reviews.length} reviews from truncated JSON`);
+                            return parsedSalvaged.reviews.filter(utils_1.validateAIResponse);
                         }
                     }
                 }
-                catch (regexError) {
-                    core.warning("Failed to extract reviews with regex");
+                catch (salvageError) {
+                    core.debug(`Failed to salvage JSON: ${salvageError instanceof Error ? salvageError.message : String(salvageError)}`);
                 }
                 return null;
             }
         }
         catch (error) {
-            core.error(`Error calling OpenAI API: ${error instanceof Error ? error.message : String(error)}`);
+            core.error(`OpenAI API error: ${error instanceof Error ? error.message : String(error)}`);
+            // Log additional error details for debugging
+            if (error instanceof Error) {
+                const errorObj = error;
+                if (errorObj.response) {
+                    core.error(`API Response Status: ${errorObj.response.status}`);
+                    core.error(`API Response Data: ${JSON.stringify(errorObj.response.data || {})}`);
+                }
+                if (errorObj.stack) {
+                    core.debug(`Error Stack: ${errorObj.stack}`);
+                }
+            }
             return null;
         }
     });
 }
 /**
- * Gets response from Anthropic API
+ * Gets response from Anthropic API with enhanced error handling and validation
  */
 function getAnthropicResponse(prompt) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            core.debug(`Sending request to Anthropic API with model: ${ANTHROPIC_API_MODEL}`);
-            const response = yield withRetry(() => anthropic.messages.create({
-                model: ANTHROPIC_API_MODEL,
-                max_tokens: 1024,
+            core.debug(`Sending request to Anthropic API with model: ${config_1.ANTHROPIC_API_MODEL}`);
+            // Adjust max tokens based on model
+            let maxTokens = 1024;
+            if (config_1.ANTHROPIC_API_MODEL.includes('haiku')) {
+                maxTokens = 800;
+            }
+            else if (config_1.ANTHROPIC_API_MODEL.includes('sonnet')) {
+                maxTokens = 4096;
+            }
+            else if (config_1.ANTHROPIC_API_MODEL.includes('opus')) {
+                maxTokens = 8192;
+            }
+            core.debug(`Using max_tokens: ${maxTokens} for Anthropic model: ${config_1.ANTHROPIC_API_MODEL}`);
+            const response = yield (0, retry_1.withRetry)(() => anthropic.messages.create({
+                model: config_1.ANTHROPIC_API_MODEL,
+                max_tokens: maxTokens,
                 temperature: 0.2,
-                system: "You are a helpful code review assistant that provides feedback in JSON format.",
+                system: "You are a code review assistant that provides feedback in JSON format. Focus ONLY on substantive issues like bugs, security vulnerabilities, and performance problems. DO NOT make generic observations about hardcoded values or suggest 'verifying' configuration values without specific technical reasons. Always format your response as a valid JSON object with a 'reviews' array.",
                 messages: [
                     {
                         role: "user",
                         content: prompt,
                     },
                 ],
-            }), MAX_RETRIES, RETRY_DELAY, "anthropic-api" // Add API name for rate limiting
-            );
+            }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "anthropic-api");
             // Process the content blocks from the response
             let textContent = "";
             // The content property is an array of content blocks
@@ -530,153 +758,263 @@ function getAnthropicResponse(prompt) {
                 return null;
             }
             try {
-                // Extract JSON from the response - Anthropic might wrap the JSON in markdown code blocks
-                let jsonContent = textContent.trim();
-                // Check if the content is wrapped in a code block and extract it
-                const jsonMatch = jsonContent.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-                if (jsonMatch && jsonMatch[1]) {
-                    jsonContent = jsonMatch[1].trim();
-                }
-                const parsedResponse = JSON.parse(jsonContent);
+                const parsedResponse = JSON.parse(textContent);
                 const reviews = parsedResponse.reviews || [];
                 // Validate each review
-                const validReviews = reviews.filter(validateAIResponse);
+                const validReviews = reviews.filter(utils_1.validateAIResponse);
                 if (validReviews.length !== reviews.length) {
                     core.warning(`Filtered out ${reviews.length - validReviews.length} invalid reviews`);
                 }
                 return validReviews;
             }
             catch (parseError) {
-                core.warning(`Failed to parse Anthropic response as JSON: ${textContent}`);
-                // Try to extract JSON from the response
-                const jsonMatch = textContent.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                    try {
-                        const extractedJson = JSON.parse(jsonMatch[0]);
-                        if (extractedJson.reviews) {
-                            core.info("Successfully extracted JSON from response");
-                            return extractedJson.reviews.filter(validateAIResponse);
-                        }
-                    }
-                    catch (extractError) {
-                        core.warning("Failed to extract JSON from response");
-                    }
-                }
+                core.error(`Failed to parse Anthropic response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
                 return null;
             }
         }
         catch (error) {
-            core.error(`Error calling Anthropic API: ${error instanceof Error ? error.message : String(error)}`);
+            core.error(`Anthropic API error: ${error instanceof Error ? error.message : String(error)}`);
+            // Log additional error details for debugging
+            if (error instanceof Error) {
+                const errorObj = error;
+                if (errorObj.response) {
+                    core.error(`API Response Status: ${errorObj.response.status}`);
+                    core.error(`API Response Data: ${JSON.stringify(errorObj.response.data || {})}`);
+                }
+                if (errorObj.status) {
+                    core.error(`API Status: ${errorObj.status}`);
+                }
+                if (errorObj.stack) {
+                    core.debug(`Error Stack: ${errorObj.stack}`);
+                }
+            }
             return null;
         }
     });
 }
 /**
- * Creates GitHub review comments from AI responses
+ * Creates a review comment from an AI response
  */
-function createComment(file, chunk, aiResponses) {
+function createComment(file, chunk, aiResponse) {
     if (!file.to) {
-        core.debug("Skipping comment creation for file with no destination path");
-        return [];
+        return null;
     }
-    // Group comments by line number to avoid duplicate comments
-    const commentsByLine = new Map();
-    aiResponses.forEach((aiResponse) => {
-        const lineNumber = Number(aiResponse.lineNumber);
-        if (isNaN(lineNumber)) {
-            core.warning(`Invalid line number in AI response: ${aiResponse.lineNumber}`);
-            return;
-        }
-        // Validate that the line number is within the chunk's range
-        const chunkEndLine = chunk.newStart + chunk.newLines - 1;
-        if (lineNumber < chunk.newStart || lineNumber > chunkEndLine) {
-            core.warning(`Line number ${lineNumber} is outside chunk range ${chunk.newStart}-${chunkEndLine}`);
-            return;
-        }
-        // Find the change that corresponds to this line number
-        const change = chunk.changes.find(c => {
-            // @ts-expect-error - ln and ln2 exist where needed
-            return c.ln === lineNumber || c.ln2 === lineNumber;
-        });
-        if (!change) {
-            core.warning(`No matching change found for line number ${lineNumber}`);
-            return;
-        }
-        // Validate that the file path exists and is not empty
-        if (!file.to || file.to.trim() === '') {
-            core.warning(`Invalid file path for comment on line ${lineNumber}`);
-            return;
-        }
-        // Group comments by line number
-        if (!commentsByLine.has(lineNumber)) {
-            commentsByLine.set(lineNumber, []);
-        }
-        commentsByLine.get(lineNumber).push(aiResponse.reviewComment);
-    });
-    // Create final comments by combining comments for the same line
-    return Array.from(commentsByLine.entries()).map(([lineNumber, comments]) => ({
+    // Validate the line number is within the chunk's range
+    const lineNumber = Number(aiResponse.lineNumber);
+    if (isNaN(lineNumber) || lineNumber < chunk.newStart || lineNumber > chunk.newStart + chunk.newLines - 1) {
+        core.warning(`Invalid line number ${lineNumber} for chunk starting at ${chunk.newStart}`);
+        return null;
+    }
+    // Create the comment
+    return {
         path: file.to,
-        body: comments.join('\n\n'),
         line: lineNumber,
+        body: aiResponse.reviewComment,
         side: 'RIGHT' // We always comment on the new version
-    }));
+    };
 }
+exports.createComment = createComment;
+
+
+/***/ }),
+
+/***/ 9481:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createReviewComment = exports.getDiff = exports.getPRDetails = void 0;
+const fs_1 = __nccwpck_require__(7147);
+const core = __importStar(__nccwpck_require__(2186));
+const rest_1 = __nccwpck_require__(5375);
+const parse_diff_1 = __importDefault(__nccwpck_require__(4833));
+const config_1 = __nccwpck_require__(6730);
+const retry_1 = __nccwpck_require__(7935);
+// Initialize GitHub client
+const octokit = new rest_1.Octokit({ auth: config_1.GITHUB_TOKEN });
+/**
+ * Fetches pull request details from GitHub
+ */
+function getPRDetails() {
+    var _a, _b;
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            if (!process.env.GITHUB_EVENT_PATH) {
+                throw new Error("GITHUB_EVENT_PATH environment variable is not set");
+            }
+            const eventData = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH, "utf8"));
+            const { repository, number } = eventData;
+            if (!repository || !number) {
+                throw new Error("Invalid event data: missing repository or PR number");
+            }
+            const prResponse = yield (0, retry_1.withRetry)(() => octokit.pulls.get({
+                owner: repository.owner.login,
+                repo: repository.name,
+                pull_number: number,
+            }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-pr");
+            return {
+                owner: repository.owner.login,
+                repo: repository.name,
+                pull_number: number,
+                title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
+                description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
+            };
+        }
+        catch (error) {
+            core.error(`Failed to get PR details: ${error instanceof Error ? error.message : String(error)}`);
+            throw error;
+        }
+    });
+}
+exports.getPRDetails = getPRDetails;
+/**
+ * Fetches the diff for a pull request
+ */
+function getDiff(owner, repo, pull_number) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const response = yield (0, retry_1.withRetry)(() => octokit.pulls.get({
+                owner,
+                repo,
+                pull_number,
+                mediaType: { format: "diff" },
+            }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-diff");
+            // @ts-expect-error - response.data is a string when mediaType.format is "diff"
+            return response.data;
+        }
+        catch (error) {
+            core.error(`Failed to get diff: ${error instanceof Error ? error.message : String(error)}`);
+            throw error;
+        }
+    });
+}
+exports.getDiff = getDiff;
 /**
  * Creates a review on the pull request with the generated comments
  */
 function createReviewComment(owner, repo, pull_number, comments) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            if (comments.length === 0) {
-                core.info("No comments to create");
-                return;
-            }
-            core.info(`Creating review with ${comments.length} comments`);
-            // First get the latest commit SHA with retry
-            const { data: pr } = yield withRetry(() => octokit.pulls.get({
+            // Get the latest commit ID
+            const { data: pullRequest } = yield (0, retry_1.withRetry)(() => octokit.pulls.get({
                 owner,
                 repo,
                 pull_number,
-            }), MAX_RETRIES, RETRY_DELAY, "github-api-get-pr");
-            const commitId = pr.head.sha;
-            // Split comments into batches to handle partial failures
-            const BATCH_SIZE = 50; // GitHub's recommended batch size
+            }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-pr");
+            const commitId = pullRequest.head.sha;
+            if (!commitId) {
+                throw new Error("Failed to get commit ID from pull request");
+            }
+            // Get the diff to validate file paths and line numbers
+            const prDiff = yield (0, retry_1.withRetry)(() => octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
+                owner,
+                repo,
+                pull_number,
+                mediaType: {
+                    format: 'diff'
+                }
+            }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-diff");
+            const parsedDiff = (0, parse_diff_1.default)(prDiff.data);
+            const validFiles = new Set(parsedDiff.map(file => file.to).filter(Boolean));
+            // Enhanced validation with diff awareness
+            const validatedComments = comments.filter(comment => {
+                // Validate path exists in current PR diff
+                if (!validFiles.has(comment.path)) {
+                    core.warning(`File path ${comment.path} not found in PR diff - skipping comment`);
+                    return false;
+                }
+                // Find the file in the diff
+                const diffFile = parsedDiff.find(file => file.to === comment.path);
+                if (!diffFile) {
+                    core.warning(`File ${comment.path} not found in parsed diff - skipping comment`);
+                    return false;
+                }
+                // Check if the line number is within any chunk's range
+                const isLineInAnyChunk = diffFile.chunks.some(chunk => {
+                    const chunkEndLine = chunk.newStart + chunk.newLines - 1;
+                    return comment.line >= chunk.newStart && comment.line <= chunkEndLine;
+                });
+                if (!isLineInAnyChunk) {
+                    core.warning(`Line ${comment.line} in file ${comment.path} not found in any diff chunk - skipping comment`);
+                    return false;
+                }
+                // Validate other aspects
+                if (typeof comment.line !== 'number' || comment.line <= 0) {
+                    core.warning(`Invalid line number ${comment.line} for file ${comment.path} - skipping comment`);
+                    return false;
+                }
+                if (!comment.body || comment.body.trim() === "") {
+                    core.warning(`Empty comment body at line ${comment.line} for file ${comment.path} - skipping comment`);
+                    return false;
+                }
+                return true;
+            });
+            if (validatedComments.length === 0) {
+                core.warning("No valid comments after enhanced validation");
+                return;
+            }
+            // Process comments in batches with improved error handling
+            const BATCH_SIZE = 10;
             const batches = [];
-            for (let i = 0; i < comments.length; i += BATCH_SIZE) {
-                batches.push(comments.slice(i, i + BATCH_SIZE));
+            for (let i = 0; i < validatedComments.length; i += BATCH_SIZE) {
+                batches.push(validatedComments.slice(i, i + BATCH_SIZE));
             }
             let successCount = 0;
             let failureCount = 0;
             const failedComments = [];
             for (const batch of batches) {
                 try {
-                    // Extra validation before sending to GitHub
+                    // Validate batch before sending
                     const validBatch = batch.filter(comment => {
-                        // Validate path
-                        if (!comment.path || comment.path.trim() === "") {
-                            core.warning(`Skipping comment with invalid path: ${comment.line}`);
-                            return false;
-                        }
-                        // Validate line number
-                        if (typeof comment.line !== 'number' || comment.line <= 0) {
-                            core.warning(`Skipping comment with invalid line number: ${comment.line} for file ${comment.path}`);
-                            return false;
-                        }
-                        // Validate body
-                        if (!comment.body || comment.body.trim() === "") {
-                            core.warning(`Skipping comment with empty body at line ${comment.line} for file ${comment.path}`);
+                        // Additional validation for the batch
+                        if (!comment.path || !comment.body || !comment.line) {
+                            core.warning(`Invalid comment in batch: ${JSON.stringify(comment)}`);
                             return false;
                         }
                         return true;
                     });
                     if (validBatch.length === 0) {
-                        core.warning("No valid comments in batch after filtering");
-                        failureCount += batch.length;
-                        failedComments.push(...batch);
+                        core.warning("No valid comments in batch after additional validation");
                         continue;
                     }
                     // Make API call with rate limiting
-                    yield withRetry(() => octokit.pulls.createReview({
+                    yield (0, retry_1.withRetry)(() => octokit.pulls.createReview({
                         owner,
                         repo,
                         pull_number,
@@ -688,7 +1026,7 @@ function createReviewComment(owner, repo, pull_number, comments) {
                             line: comment.line,
                             side: comment.side || 'RIGHT'
                         }))
-                    }), MAX_RETRIES, RETRY_DELAY, "github-api-create-review");
+                    }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-create-review");
                     successCount += validBatch.length;
                     // If some comments were filtered out, track them as failures
                     if (validBatch.length < batch.length) {
@@ -705,11 +1043,14 @@ function createReviewComment(owner, repo, pull_number, comments) {
                     const errorMessage = error instanceof Error ? error.message : String(error);
                     core.warning(`Failed to create batch of ${batch.length} comments: ${errorMessage}`);
                     // Try to extract the invalid comment from the error message
-                    if (errorMessage.includes("path is invalid") || errorMessage.includes("line number") || errorMessage.includes("diff hunk")) {
+                    if (errorMessage.includes("path is invalid") ||
+                        errorMessage.includes("line number") ||
+                        errorMessage.includes("diff hunk")) {
                         core.warning("Attempting to identify and remove problematic comments for future batches");
                     }
                 }
             }
+            // Log results
             if (successCount > 0) {
                 core.info(`Successfully created ${successCount} comments`);
             }
@@ -746,148 +1087,224 @@ function createReviewComment(owner, repo, pull_number, comments) {
         }
     });
 }
+exports.createReviewComment = createReviewComment;
+
+
+/***/ }),
+
+/***/ 7935:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.withRetry = void 0;
+const core = __importStar(__nccwpck_require__(2186));
+const config_1 = __nccwpck_require__(6730);
+// Track last API call time for rate limiting
+const API_CALL_QUEUE = new Map();
 /**
- * Gets the diff for a PR based on the event type
+ * Adds rate limiting to API calls
  */
-function getDiffForEvent(prDetails) {
+function withRateLimit(operation, apiName) {
     return __awaiter(this, void 0, void 0, function* () {
-        try {
-            if (!process.env.GITHUB_EVENT_PATH) {
-                throw new Error("GITHUB_EVENT_PATH environment variable is not set");
-            }
-            const eventData = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH, "utf8"));
-            if (eventData.action === "opened") {
-                core.info("Processing 'opened' event");
-                return yield getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
-            }
-            else if (eventData.action === "synchronize") {
-                core.info("Processing 'synchronize' event");
-                const newBaseSha = eventData.before;
-                const newHeadSha = eventData.after;
-                if (!newBaseSha || !newHeadSha) {
-                    throw new Error("Missing base or head SHA for synchronize event");
+        const now = Date.now();
+        const lastCallTime = API_CALL_QUEUE.get(apiName) || 0;
+        const timeToWait = Math.max(0, lastCallTime + config_1.RATE_LIMIT_DELAY - now);
+        if (timeToWait > 0) {
+            core.debug(`Rate limiting: Waiting ${timeToWait}ms before calling ${apiName}`);
+            yield delay(timeToWait);
+        }
+        API_CALL_QUEUE.set(apiName, Date.now());
+        return operation();
+    });
+}
+/**
+ * Helper function to delay execution
+ */
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+/**
+ * Helper function to retry an async operation with exponential backoff
+ */
+function withRetry(operation, maxRetries = config_1.MAX_RETRIES, delayMs = config_1.RETRY_DELAY, apiName) {
+    return __awaiter(this, void 0, void 0, function* () {
+        let lastError = null;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                // Add rate limiting if apiName is provided
+                if (apiName) {
+                    return yield withRateLimit(() => operation(), apiName);
                 }
-                const response = yield octokit.repos.compareCommits({
-                    headers: {
-                        accept: "application/vnd.github.v3.diff",
-                    },
-                    owner: prDetails.owner,
-                    repo: prDetails.repo,
-                    base: newBaseSha,
-                    head: newHeadSha,
-                });
-                return String(response.data);
+                else {
+                    return yield operation();
+                }
             }
-            else {
-                core.warning(`Unsupported event action: ${eventData.action}`);
-                return null;
+            catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error));
+                // Check for rate limiting errors and adjust delay
+                if (error instanceof Error) {
+                    const errorMsg = error.message.toLowerCase();
+                    if (errorMsg.includes('rate limit') ||
+                        errorMsg.includes('too many requests') ||
+                        errorMsg.includes('429')) {
+                        // For rate limit errors, use a longer delay with exponential backoff
+                        delayMs = Math.min(delayMs * 3, config_1.MAX_RETRY_DELAY);
+                        core.warning(`Rate limit detected, increasing delay to ${delayMs}ms`);
+                    }
+                }
+                if (attempt < maxRetries) {
+                    core.warning(`Attempt ${attempt} failed, retrying in ${delayMs}ms...`);
+                    yield delay(delayMs * attempt); // Exponential backoff
+                }
             }
         }
-        catch (error) {
-            core.error(`Failed to get diff for event: ${error instanceof Error ? error.message : String(error)}`);
-            throw error;
-        }
+        throw lastError;
     });
 }
-/**
- * Filters files based on exclude patterns
- */
-function filterFiles(parsedDiff) {
-    if (EXCLUDE_PATTERNS.length === 0) {
-        return parsedDiff;
+exports.withRetry = withRetry;
+
+
+/***/ }),
+
+/***/ 1606:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
     }
-    core.info(`Filtering files with exclude patterns: ${EXCLUDE_PATTERNS.join(', ')}`);
-    return parsedDiff.filter((file) => {
-        if (!file.to)
-            return false;
-        const shouldExclude = EXCLUDE_PATTERNS.some((pattern) => (0, minimatch_1.default)(file.to, pattern));
-        if (shouldExclude) {
-            core.debug(`Excluding file: ${file.to}`);
-        }
-        return !shouldExclude;
-    });
-}
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.validateAIResponse = exports.getLanguageFromPath = exports.isChunkTooLarge = exports.isFileTooLarge = exports.delay = void 0;
+const core = __importStar(__nccwpck_require__(2186));
+const config_1 = __nccwpck_require__(6730);
 /**
- * Validates the configuration based on the selected AI provider
+ * Helper function to delay execution
  */
-function validateConfig() {
-    if (AI_PROVIDER.toLowerCase() === "anthropic") {
-        if (!ANTHROPIC_API_KEY) {
-            throw new Error("ANTHROPIC_API_KEY is required when using Anthropic as the AI provider");
-        }
-        core.info(`Using Anthropic as AI provider with model: ${ANTHROPIC_API_MODEL}`);
-    }
-    else {
-        // Default to OpenAI
-        if (!OPENAI_API_KEY) {
-            throw new Error("OPENAI_API_KEY is required when using OpenAI as the AI provider");
-        }
-        core.info(`Using OpenAI as AI provider with model: ${OPENAI_API_MODEL}`);
-    }
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
+exports.delay = delay;
 /**
- * Main function
+ * Safely validates a file is within size limits
  */
-function main() {
-    return __awaiter(this, void 0, void 0, function* () {
-        try {
-            core.info("Starting AI code review");
-            core.info(`Configuration:
-- AI Provider: ${AI_PROVIDER}
-- Model: ${AI_PROVIDER === 'openai' ? OPENAI_API_MODEL : ANTHROPIC_API_MODEL}
-- Max Files: ${MAX_FILES > 0 ? MAX_FILES : 'No limit'}
-- Exclude Patterns: ${EXCLUDE_PATTERNS.length > 0 ? EXCLUDE_PATTERNS.join(', ') : 'None'}`);
-            // Validate configuration
-            validateConfig();
-            // Get PR details
-            const prDetails = yield getPRDetails();
-            core.info(`Processing PR #${prDetails.pull_number} in ${prDetails.owner}/${prDetails.repo}`);
-            core.info(`PR Title: ${prDetails.title}`);
-            if (prDetails.description) {
-                core.info(`PR Description: ${prDetails.description}`);
-            }
-            // Get diff
-            const diff = yield getDiffForEvent(prDetails);
-            if (!diff) {
-                core.info("No diff found or unsupported event");
-                return;
-            }
-            // Parse and filter diff
-            const parsedDiff = (0, parse_diff_1.default)(diff);
-            core.info(`\nFound ${parsedDiff.length} changed files:`);
-            parsedDiff.forEach(file => {
-                core.info(`- ${file.to} (+${file.additions} -${file.deletions})`);
-            });
-            const filteredDiff = filterFiles(parsedDiff);
-            core.info(`\nAnalyzing ${filteredDiff.length} files after filtering`);
-            // Analyze code and create comments
-            const comments = yield analyzeCode(filteredDiff, prDetails);
-            // Create review if there are comments
-            if (comments.length > 0) {
-                core.info(`\nCreating review with ${comments.length} comments:`);
-                comments.forEach(comment => {
-                    core.info(`- ${comment.path}:${comment.line} - ${comment.body.split('\n')[0]}...`);
-                });
-                yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
-            }
-            else {
-                core.info("\nNo comments to add");
-            }
-            core.info("\nAI code review completed successfully");
-        }
-        catch (error) {
-            core.setFailed(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    });
+function isFileTooLarge(file) {
+    const totalLines = file.additions + file.deletions;
+    if (totalLines > config_1.MAX_FILE_TOTAL_LINES) {
+        core.warning(`Skipping file ${file.to}: Too large (${totalLines} lines)`);
+        return true;
+    }
+    return false;
 }
-exports.main = main;
-// Only run the main function if this file is being run directly
-if (require.main === require.cache[eval('__filename')]) {
-    main().catch((error) => {
-        core.setFailed(`Unhandled error: ${error instanceof Error ? error.message : String(error)}`);
-        process.exit(1);
-    });
+exports.isFileTooLarge = isFileTooLarge;
+/**
+ * Safely validates a chunk is within size limits
+ */
+function isChunkTooLarge(chunk) {
+    const totalLines = chunk.newLines + chunk.oldLines;
+    if (totalLines > config_1.MAX_CHUNK_TOTAL_LINES) {
+        core.warning(`Skipping chunk: Too large (${totalLines} lines)`);
+        return true;
+    }
+    return false;
 }
+exports.isChunkTooLarge = isChunkTooLarge;
+/**
+ * Gets the programming language from a file path
+ */
+function getLanguageFromPath(filePath) {
+    var _a;
+    const extension = ((_a = filePath.split('.').pop()) === null || _a === void 0 ? void 0 : _a.toLowerCase()) || '';
+    return config_1.LANGUAGE_MAP[extension] || 'Unknown';
+}
+exports.getLanguageFromPath = getLanguageFromPath;
+/**
+ * Validates an AI response
+ */
+function validateAIResponse(response) {
+    // Validate line number is a positive integer
+    const lineNumber = Number(response.lineNumber);
+    if (isNaN(lineNumber) || lineNumber <= 0) {
+        core.warning(`Invalid line number in AI response: ${response.lineNumber}`);
+        return false;
+    }
+    // Validate review comment is not empty and has reasonable length
+    if (!response.reviewComment || response.reviewComment.trim().length === 0) {
+        core.warning('Empty review comment received from AI');
+        return false;
+    }
+    if (response.reviewComment.length > 65536) { // GitHub's max comment length
+        core.warning('Review comment exceeds GitHub\'s maximum length');
+        return false;
+    }
+    // Validate file path exists and is a string
+    if (!response.filePath || typeof response.filePath !== 'string') {
+        core.warning('Invalid or missing file path in AI response');
+        return false;
+    }
+    // Validate severity is one of the allowed values
+    const validSeverities = ['error', 'warning', 'info'];
+    if (!validSeverities.includes(response.severity)) {
+        core.warning(`Invalid severity level in AI response: ${response.severity}`);
+        return false;
+    }
+    return true;
+}
+exports.validateAIResponse = validateAIResponse;
 
 
 /***/ }),

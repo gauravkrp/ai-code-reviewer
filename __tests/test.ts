@@ -10,7 +10,7 @@ process.env.INPUT_AI_PROVIDER = 'openai';
 process.env.INPUT_OPENAI_API_MODEL = 'o3-mini';
 // Exclude lock files and limit files for testing
 process.env.INPUT_EXCLUDE = '**/*lock.json,**/yarn.lock,**/package-lock.json';
-process.env.INPUT_MAX_FILES = '5';  // Limit to first 5 files for testing
+process.env.INPUT_MAX_FILES = '10';  // Limit to first 5 files for testing
 
 // Set up logging for AI responses
 process.env.ACTIONS_STEP_DEBUG = 'true';  // Enable debug logging

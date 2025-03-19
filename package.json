@@ -14,7 +14,8 @@
     "pre-commit": "npm run build && npm run package",
     "test:local": "ts-node __tests/test.ts",
     "test:github": "ts-node __tests/test-github.ts",
-    "test:ai": "ts-node __tests/test-ai.ts"
+    "test:ai": "ts-node __tests/test-ai.ts",
+    "test:openai": "node scripts/test-openai.js"
   },
   "dependencies": {
     "@actions/core": "^1.10.0",
