@@ -237,9 +237,38 @@ function processFile(file, prDetails) {
         }
         const comments = [];
         core.debug(`File has ${file.chunks.length} chunks to process`);
-        for (let i = 0; i < file.chunks.length; i++) {
-            const chunk = file.chunks[i];
-            core.debug(`Processing chunk ${i + 1}/${file.chunks.length}: lines ${chunk.newStart}-${chunk.newStart + chunk.newLines - 1}`);
+        // Merge small chunks together
+        const mergedChunks = [];
+        let currentChunk = null;
+        for (const chunk of file.chunks) {
+            if (!currentChunk) {
+                currentChunk = Object.assign({}, chunk);
+            }
+            else {
+                // If the current chunk is small and the next chunk is small, merge them
+                const currentTotalLines = currentChunk.newLines + currentChunk.oldLines;
+                const nextTotalLines = chunk.newLines + chunk.oldLines;
+                if (currentTotalLines < 100 && nextTotalLines < 100) {
+                    // Merge chunks
+                    currentChunk.newLines += chunk.newLines;
+                    currentChunk.oldLines += chunk.oldLines;
+                    currentChunk.changes = [...currentChunk.changes, ...chunk.changes];
+                }
+                else {
+                    // Add current chunk and start a new one
+                    mergedChunks.push(currentChunk);
+                    currentChunk = Object.assign({}, chunk);
+                }
+            }
+        }
+        // Add the last chunk if it exists
+        if (currentChunk) {
+            mergedChunks.push(currentChunk);
+        }
+        core.debug(`Merged ${file.chunks.length} chunks into ${mergedChunks.length} chunks`);
+        for (let i = 0; i < mergedChunks.length; i++) {
+            const chunk = mergedChunks[i];
+            core.debug(`Processing chunk ${i + 1}/${mergedChunks.length}: lines ${chunk.newStart}-${chunk.newStart + chunk.newLines - 1}`);
             if ((0, utils_1.isChunkTooLarge)(chunk)) {
                 core.info(`Skipping chunk ${i + 1} in ${filePath}: Chunk exceeds size limits`);
                 continue;
@@ -259,9 +288,8 @@ function processFile(file, prDetails) {
                 continue;
             }
             core.info(`Received ${aiResponses.length} comments from AI for chunk ${i + 1} in ${filePath}`);
-            // Process each AI response
+            // Process each AI response and create comments
             for (const response of aiResponses) {
-                core.debug(`Processing AI comment for line ${response.lineNumber}: ${response.severity}`);
                 const comment = (0, ai_1.createComment)(file, chunk, response);
                 if (comment !== null) {
                     core.debug(`Added comment at line ${comment.line} in ${comment.path}`);
@@ -805,11 +833,23 @@ function createComment(file, chunk, aiResponse) {
         core.warning(`Invalid line number ${lineNumber} for chunk starting at ${chunk.newStart}`);
         return null;
     }
+    // Format the comment body to properly handle code suggestions
+    let formattedComment = aiResponse.reviewComment;
+    // If the comment contains code suggestions, format them properly
+    const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+    if (codeBlockRegex.test(formattedComment)) {
+        // Replace code blocks with properly formatted ones
+        formattedComment = formattedComment.replace(codeBlockRegex, (match, lang, code) => {
+            // If no language is specified, try to detect it from the file extension
+            const language = lang || (0, utils_1.getLanguageFromPath)(file.to || '').toLowerCase();
+            return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
+        });
+    }
     // Create the comment
     return {
         path: file.to,
         line: lineNumber,
-        body: aiResponse.reviewComment,
+        body: formattedComment,
         side: 'RIGHT' // We always comment on the new version
     };
 }

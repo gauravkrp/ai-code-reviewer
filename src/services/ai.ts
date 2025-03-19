@@ -345,11 +345,25 @@ export function createComment(file: File, chunk: Chunk, aiResponse: AIReviewResp
     return null;
   }
 
+  // Format the comment body to properly handle code suggestions
+  let formattedComment = aiResponse.reviewComment;
+  
+  // If the comment contains code suggestions, format them properly
+  const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+  if (codeBlockRegex.test(formattedComment)) {
+    // Replace code blocks with properly formatted ones
+    formattedComment = formattedComment.replace(codeBlockRegex, (match, lang, code) => {
+      // If no language is specified, try to detect it from the file extension
+      const language = lang || getLanguageFromPath(file.to || '').toLowerCase();
+      return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
+    });
+  }
+
   // Create the comment
   return {
     path: file.to,
     line: lineNumber,
-    body: aiResponse.reviewComment,
+    body: formattedComment,
     side: 'RIGHT' as const // We always comment on the new version
   };
 } 

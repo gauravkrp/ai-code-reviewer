@@ -1,5 +1,5 @@
 import * as core from "@actions/core";
-import parseDiff, { File } from "parse-diff";
+import parseDiff, { File, Chunk } from "parse-diff";
 import minimatch from "minimatch";
 import { ReviewComment, PRDetails } from "./types";
 import { 
@@ -114,9 +114,41 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
   const comments: ReviewComment[] = [];
   core.debug(`File has ${file.chunks.length} chunks to process`);
   
-  for (let i = 0; i < file.chunks.length; i++) {
-    const chunk = file.chunks[i];
-    core.debug(`Processing chunk ${i+1}/${file.chunks.length}: lines ${chunk.newStart}-${chunk.newStart + chunk.newLines - 1}`);
+  // Merge small chunks together
+  const mergedChunks: Chunk[] = [];
+  let currentChunk: Chunk | null = null;
+  
+  for (const chunk of file.chunks) {
+    if (!currentChunk) {
+      currentChunk = { ...chunk };
+    } else {
+      // If the current chunk is small and the next chunk is small, merge them
+      const currentTotalLines = currentChunk.newLines + currentChunk.oldLines;
+      const nextTotalLines = chunk.newLines + chunk.oldLines;
+      
+      if (currentTotalLines < 100 && nextTotalLines < 100) {
+        // Merge chunks
+        currentChunk.newLines += chunk.newLines;
+        currentChunk.oldLines += chunk.oldLines;
+        currentChunk.changes = [...currentChunk.changes, ...chunk.changes];
+      } else {
+        // Add current chunk and start a new one
+        mergedChunks.push(currentChunk);
+        currentChunk = { ...chunk };
+      }
+    }
+  }
+  
+  // Add the last chunk if it exists
+  if (currentChunk) {
+    mergedChunks.push(currentChunk);
+  }
+  
+  core.debug(`Merged ${file.chunks.length} chunks into ${mergedChunks.length} chunks`);
+  
+  for (let i = 0; i < mergedChunks.length; i++) {
+    const chunk = mergedChunks[i];
+    core.debug(`Processing chunk ${i+1}/${mergedChunks.length}: lines ${chunk.newStart}-${chunk.newStart + chunk.newLines - 1}`);
     
     if (isChunkTooLarge(chunk)) {
       core.info(`Skipping chunk ${i+1} in ${filePath}: Chunk exceeds size limits`);
@@ -143,9 +175,8 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
 
     core.info(`Received ${aiResponses.length} comments from AI for chunk ${i+1} in ${filePath}`);
     
-    // Process each AI response
+    // Process each AI response and create comments
     for (const response of aiResponses) {
-      core.debug(`Processing AI comment for line ${response.lineNumber}: ${response.severity}`);
       const comment = createComment(file, chunk, response);
       
       if (comment !== null) {
