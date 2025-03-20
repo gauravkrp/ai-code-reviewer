@@ -121,7 +121,76 @@ export async function getDiff(owner: string, repo: string, pull_number: number):
 		const eventType = eventData.action || (eventData.commits ? "push" : "unknown");
 		core.debug(`Processing GitHub event type: ${eventType}`);
 
-		// If this is a pull request event, get the diff from the event payload
+		// If this is a PR synchronize event (push to existing PR), only review the new commits
+		if (eventData.pull_request && eventData.action === "synchronize") {
+			core.info("Processing PR synchronize event - getting diff of only the newly pushed commits");
+			
+			// For sync events, get the before and after commit SHAs
+			const currentCommit = eventData.after || eventData.pull_request.head.sha;
+			const baseCommit = eventData.before;
+			
+			if (!currentCommit || !baseCommit) {
+				core.warning("Missing commit information for synchronize event, falling back to full PR diff");
+			} else {
+				core.info(`Comparing only new commits: ${baseCommit} -> ${currentCommit}`);
+				try {
+					const response = await withRetry(
+						() =>
+							octokit.repos.compareCommits({
+								owner,
+								repo,
+								base: baseCommit,
+								head: currentCommit,
+							}),
+						MAX_RETRIES,
+						RETRY_DELAY,
+						"github-api-get-sync-commits-diff"
+					);
+					
+					if (response.data && response.data.files) {
+						core.info("Successfully retrieved changes for newly pushed commits only");
+						
+						// Manually construct a diff from the files in the response
+						let manualDiff = "";
+						for (const file of response.data.files) {
+							if (!file.filename) continue;
+							
+							manualDiff += `diff --git a/${file.filename} b/${file.filename}\n`;
+							
+							if (file.status === "added") {
+								manualDiff += `new file mode 100644\n`;
+								manualDiff += `--- /dev/null\n`;
+								manualDiff += `+++ b/${file.filename}\n`;
+							} else if (file.status === "removed") {
+								manualDiff += `deleted file mode 100644\n`;
+								manualDiff += `--- a/${file.filename}\n`;
+								manualDiff += `+++ /dev/null\n`;
+							} else {
+								manualDiff += `--- a/${file.filename}\n`;
+								manualDiff += `+++ b/${file.filename}\n`;
+							}
+							
+							// Add the patch if available
+							if (file.patch) {
+								manualDiff += file.patch + "\n";
+							} else if (file.additions || file.deletions) {
+								manualDiff += `@@ -1,1 +1,1 @@\n`;
+								manualDiff += `// Changed file with ${file.additions || 0} additions and ${file.deletions || 0} deletions\n`;
+							}
+						}
+						
+						if (manualDiff) {
+							return manualDiff;
+						}
+					}
+				} catch (error) {
+					core.warning(`Failed to get diff for new commits: ${error instanceof Error ? error.message : String(error)}`);
+					core.info("Falling back to full PR diff");
+				}
+			}
+		}
+
+		// If this is a regular pull request event, get the diff from the event payload
 		if (eventData.pull_request) {
 			core.info("Processing pull request event - getting full PR diff");
 			const response = await withRetry(
