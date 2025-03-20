@@ -34,6 +34,10 @@ inputs:
     description: "Whether to generate automated fixes for common issues"
     required: false
     default: "true"
+  ENABLE_AUTO_PR:
+    description: "Whether to automatically create a PR that applies all suggested fixes"
+    required: false
+    default: "false"
   SUGGESTION_STRATEGY:
     description: "How to prioritize suggestions: auto-fix-first, ai-first, or ai-only"
     required: false

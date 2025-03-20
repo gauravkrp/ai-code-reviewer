@@ -14,7 +14,8 @@ import {
 	MAX_FILE_TOTAL_LINES,
 	ENABLE_SUMMARY,
 	ENABLE_AUTO_FIX,
-	SUGGESTION_STRATEGY
+	SUGGESTION_STRATEGY,
+	ENABLE_AUTO_PR
 } from "./config";
 import { isFileTooLarge, isChunkTooLarge } from "./utils";
 import {
@@ -28,9 +29,12 @@ import { getAIResponse, createComment, createPrompt, generateReviewSummary } fro
 import { readFileSync } from "fs";
 import { getCommentHistory, storeCommentHistory, trackCommonIssue } from "./services/cache";
 import { tryAutomaticFix } from "./utils/auto-fix";
+import { createFixPR } from "./services/auto-pr";
+import { Octokit } from "@octokit/rest";
 
 // Constants for configuration
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
+const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
 /**
  * Checks if a new comment is semantically similar to an existing one
@@ -713,6 +717,42 @@ export async function main() {
 				core.info(`Submitting review with ${filteredComments.length} comments to GitHub...`);
 				await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, filteredComments);
 				core.info("Review successfully submitted to GitHub");
+				
+				// Create a PR with all the suggested fixes if enabled
+				if (ENABLE_AUTO_PR && prDetails.eventType === "pull_request") {
+					core.info("Creating PR with suggested fixes...");
+					try {
+						// Get the PR details to find the head branch
+						const prResponse = await octokit.pulls.get({
+							owner: prDetails.owner,
+							repo: prDetails.repo,
+							pull_number: prDetails.pull_number,
+						});
+						
+						// Ensure we have a head branch reference
+						if (!prResponse.data.head || !prResponse.data.head.ref) {
+							core.warning("Could not determine head branch for PR. Auto-fix PR creation skipped.");
+						} else {
+							// Create a PR that applies all suggestions
+							const prNumber = await createFixPR(
+								prDetails.owner,
+								prDetails.repo,
+								prResponse.data.head.ref, // The PR's head branch
+								prDetails.pull_number,
+								filteredComments
+							);
+							
+							if (prNumber) {
+								core.info(`Created PR #${prNumber} with all suggested fixes`);
+							} else {
+								core.info("No auto-fix PR was created (no applicable suggestions found)");
+							}
+						}
+					} catch (error) {
+						core.warning(`Failed to create auto-fix PR: ${error instanceof Error ? error.message : String(error)}`);
+						core.debug("Continuing with normal execution despite auto-fix PR failure");
+					}
+				}
 			} catch (error) {
 				// If creating the review fails, log the error but don't fail the action
 				core.error(`Failed to create review: ${error instanceof Error ? error.message : String(error)}`);

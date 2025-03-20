@@ -11,6 +11,7 @@ review process.
 - Generates comprehensive review summaries for quick understanding of key issues.
 - Offers inline code suggestions using GitHub's suggestion syntax for easy fixes.
 - Includes automated fix recommendations for common coding issues.
+- Can automatically create a PR that applies all suggested fixes.
 - Customizable review focus areas (code quality, security, performance, etc.).
 - Filters out files that match specified exclude patterns.
 - Supports both pull requests and direct code pushes to branches.
@@ -64,6 +65,7 @@ jobs:
           # Review customization
           ENABLE_SUMMARY: "true" # Optional: generate a summary of all review findings (default: true)
           ENABLE_AUTO_FIX: "true" # Optional: generate automated fixes for common issues (default: true)
+          ENABLE_AUTO_PR: "false" # Optional: create a PR that applies all suggested fixes (default: false)
           REVIEW_FOCUS: "security,performance,bugs" # Optional: customize review focus areas
           SUGGESTION_STRATEGY: "auto-fix-first" # Optional: controls the suggestion strategy (default: auto-fix-first)
           # Cache configuration (all optional)
@@ -113,6 +115,7 @@ jobs:
           # Review customization
           ENABLE_SUMMARY: "true" # Optional: generate a summary of all review findings
           ENABLE_AUTO_FIX: "true" # Optional: generate automated fixes for common issues
+          ENABLE_AUTO_PR: "false" # Optional: create a PR that applies all suggested fixes
           REVIEW_FOCUS: "security,performance,maintainability" # Optional: customize review focus areas
           SUGGESTION_STRATEGY: "auto-fix-first" # Optional: controls the suggestion strategy
           # Cache configuration
@@ -155,6 +158,7 @@ jobs:
           # Review customization using repository variables
           ENABLE_SUMMARY: ${{ vars.ENABLE_SUMMARY || 'true' }}
           ENABLE_AUTO_FIX: ${{ vars.ENABLE_AUTO_FIX || 'true' }}
+          ENABLE_AUTO_PR: ${{ vars.ENABLE_AUTO_PR || 'false' }}
           REVIEW_FOCUS: ${{ vars.REVIEW_FOCUS || 'code_quality,bugs,security,performance,maintainability' }}
           SUGGESTION_STRATEGY: ${{ vars.SUGGESTION_STRATEGY || 'auto-fix-first' }}
           # Cache configuration using repository variables
@@ -238,9 +242,22 @@ SUGGESTION_STRATEGY: "ai-only"        # Only use AI-generated suggestions, never
 
 This allows you to prioritize the more reliable auto-fixes for common patterns, or prefer the AI's custom suggestions when they're available.
 
+### Automatic Fix PRs
+
+You can enable the system to automatically create a pull request that applies all suggested fixes:
+
 ```yaml
-ENABLE_AUTO_FIX: "true"  # or "false" to disable
+ENABLE_AUTO_PR: "true"  # Default is "false"
 ```
+
+When enabled, the system will:
+1. Collect all suggestions from the review comments
+2. Create a new branch based on the PR's head branch
+3. Apply all suggestions to the appropriate files
+4. Create a new PR that targets the original PR's branch
+5. Include a detailed description of all the applied fixes
+
+This completely automates the process of applying fixes - instead of clicking each suggestion individually, you can simply review and merge the auto-fix PR.
 
 ### Support for Code Pushes
 
