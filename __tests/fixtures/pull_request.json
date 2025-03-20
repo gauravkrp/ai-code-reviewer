@@ -1,17 +1,17 @@
 {
   "action": "opened",
-  "number": 1881,
+  "number": 1992,
   "pull_request": {
-    "number": 1881,
-    "title": "THERA-3769/thera-wallet-fe",
+    "number": 1992,
+    "title": "Thera 3893 | Pay Type Column",
     "body": "",
     "base": {
-      "sha": "91fdc1fd7d16ae2948a705ce2d4c08f474a11916",
+      "sha": "61e537c62b72b43c48f2321e0618d33d2120e779",
       "ref": "staging"
     },
     "head": {
-      "sha": "715da94fcb7dc6cfba016645ba9e745a5378c9ed",
-      "ref": "THERA-3769/thera-wallet-fe"
+      "sha": "401b5a62f2b4bd72ae496009ce4affca2211bcbf",
+      "ref": "THERA-3893"
     }
   },
   "repository": {

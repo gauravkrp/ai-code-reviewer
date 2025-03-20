@@ -81,7 +81,7 @@ ${focusAreas}
 
 Instructions:
 - Provide specific feedback only if issues are detected; otherwise, return an empty JSON array.
-- Use GitHub Markdown format and output only JSON inside a code block.
+- Return your response as a pure JSON object, not wrapped in markdown code blocks.
 - Use the PR title and description solely as overall context; review only the provided code diff.
 - Do not comment on hardcoded values, naming, or configuration entries unless they pose a concrete risk.
 - For newly added imports or variables, flag them only if they are unused.
@@ -89,7 +89,7 @@ Instructions:
 - Do not suggest adding inline comments to the code.
 - For each issue found, provide a concrete code suggestion with a complete fix when possible.
 
-Return your review only as a JSON array of objects with the following structure:
+Return your review as a JSON object with the following structure:
 {
   "reviews": [
     {
@@ -284,6 +284,29 @@ async function getOpenAIResponse(prompt: string, chunk?: Chunk): Promise<AIRespo
 				`Failed to parse OpenAI response: ${parseError instanceof Error ? parseError.message : String(parseError)}`
 			);
 
+			// Try to extract JSON from markdown code blocks if direct parsing failed
+			try {
+				core.debug("Direct JSON parse failed, attempting to extract JSON from code blocks");
+				
+				// Extract JSON from markdown code blocks
+				const jsonMatch = content.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+				if (jsonMatch && jsonMatch[1]) {
+					const jsonContent = jsonMatch[1].trim();
+					const parsedResponse = JSON.parse(jsonContent);
+					const reviews = parsedResponse.reviews || [];
+
+					// Validate each review
+					const validReviews = reviews.filter(validateAIResponse);
+					if (validReviews.length !== reviews.length) {
+						core.warning(`Filtered out ${reviews.length - validReviews.length} invalid reviews`);
+					}
+
+					return validReviews;
+				}
+			} catch (markdownParseError) {
+				core.debug("Failed to extract JSON from markdown code blocks");
+			}
+
 			// Log the full response details for debugging when there's an error
 			core.debug(
 				`Full OpenAI response details: ${JSON.stringify(
@@ -460,16 +483,41 @@ async function getAnthropicResponse(prompt: string): Promise<AIResponseArray | n
 		}
 
 		try {
-			const parsedResponse = JSON.parse(textContent);
-			const reviews = parsedResponse.reviews || [];
+			// First try to parse the response directly as JSON
+			try {
+				const parsedResponse = JSON.parse(textContent);
+				const reviews = parsedResponse.reviews || [];
 
-			// Validate each review
-			const validReviews = reviews.filter(validateAIResponse);
-			if (validReviews.length !== reviews.length) {
-				core.warning(`Filtered out ${reviews.length - validReviews.length} invalid reviews`);
+				// Validate each review
+				const validReviews = reviews.filter(validateAIResponse);
+				if (validReviews.length !== reviews.length) {
+					core.warning(`Filtered out ${reviews.length - validReviews.length} invalid reviews`);
+				}
+
+				return validReviews;
+			} catch (directParseError) {
+				core.debug("Direct JSON parse failed, attempting to extract JSON from code blocks");
+				
+				// Extract JSON from markdown code blocks
+				const jsonMatch = textContent.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+				if (!jsonMatch || !jsonMatch[1]) {
+					core.error("Could not find JSON code block in Anthropic response");
+					core.debug(`Full response content: ${textContent}`);
+					return null;
+				}
+
+				const jsonContent = jsonMatch[1].trim();
+				const parsedResponse = JSON.parse(jsonContent);
+				const reviews = parsedResponse.reviews || [];
+
+				// Validate each review
+				const validReviews = reviews.filter(validateAIResponse);
+				if (validReviews.length !== reviews.length) {
+					core.warning(`Filtered out ${reviews.length - validReviews.length} invalid reviews`);
+				}
+
+				return validReviews;
 			}
-
-			return validReviews;
 		} catch (parseError) {
 			// In case of error, log more detailed information
 			core.error(
