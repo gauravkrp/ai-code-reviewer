@@ -158,6 +158,45 @@ const fs_1 = __nccwpck_require__(7147);
 // Constants for configuration
 const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
 /**
+ * Checks if a new comment is semantically similar to an existing one
+ * @param newComment The new comment to check
+ * @param existingComment The existing comment to compare against
+ * @returns True if the comments are similar
+ */
+function isCommentSimilar(newComment, existingComment) {
+    // Remove markdown formatting to just get text content
+    const cleanNew = newComment.replace(/[*_~`#>]/g, "").toLowerCase();
+    const cleanExisting = existingComment.replace(/[*_~`#>]/g, "").toLowerCase();
+    // If either comment is very short, require a closer match
+    const shortCommentThreshold = 40;
+    const similarityThreshold = cleanNew.length < shortCommentThreshold || cleanExisting.length < shortCommentThreshold ? 0.8 : 0.6;
+    // Look for substantial shared substrings
+    const sharedWords = cleanNew.split(/\s+/).filter((word) => word.length > 3 && cleanExisting.includes(word));
+    if (sharedWords.length >= 3) {
+        return true;
+    }
+    // Check if one is a substring of the other
+    if (cleanNew.includes(cleanExisting) || cleanExisting.includes(cleanNew)) {
+        return true;
+    }
+    // For very short comments, check if they share significant percentage of words
+    if (cleanNew.length < shortCommentThreshold || cleanExisting.length < shortCommentThreshold) {
+        const newWords = new Set(cleanNew.split(/\s+/).filter((w) => w.length > 3));
+        const existingWords = new Set(cleanExisting.split(/\s+/).filter((w) => w.length > 3));
+        let intersectionCount = 0;
+        for (const word of newWords) {
+            if (existingWords.has(word)) {
+                intersectionCount++;
+            }
+        }
+        const smallerSetSize = Math.min(newWords.size, existingWords.size);
+        if (smallerSetSize > 0 && intersectionCount / smallerSetSize > similarityThreshold) {
+            return true;
+        }
+    }
+    return false;
+}
+/**
  * Filters files based on exclude patterns
  * Removes files that match any of the exclude patterns specified in configuration
  *
@@ -166,14 +205,14 @@ const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
  */
 function filterFiles(parsedDiff) {
     if (config_1.EXCLUDE_PATTERNS.length === 0) {
-        core.debug('No exclude patterns specified, skipping file filtering');
+        core.debug("No exclude patterns specified, skipping file filtering");
         return parsedDiff;
     }
-    core.info(`Filtering files with exclude patterns: ${config_1.EXCLUDE_PATTERNS.join(', ')}`);
+    core.info(`Filtering files with exclude patterns: ${config_1.EXCLUDE_PATTERNS.join(", ")}`);
     const originalCount = parsedDiff.length;
     const filtered = parsedDiff.filter((file) => {
         if (!file.to) {
-            core.debug(`Skipping file without path (probably deleted): ${file.from || 'unknown'}`);
+            core.debug(`Skipping file without path (probably deleted): ${file.from || "unknown"}`);
             return false;
         }
         const shouldExclude = config_1.EXCLUDE_PATTERNS.some((pattern) => (0, minimatch_1.default)(file.to, pattern));
@@ -195,7 +234,7 @@ function filterFiles(parsedDiff) {
  * @throws Error if required API keys are missing
  */
 function validateConfig() {
-    core.debug('Validating configuration...');
+    core.debug("Validating configuration...");
     if (config_1.AI_PROVIDER.toLowerCase() === "anthropic") {
         if (!config_1.ANTHROPIC_API_KEY) {
             const error = "ANTHROPIC_API_KEY is required when using Anthropic as the AI provider";
@@ -218,7 +257,7 @@ function validateConfig() {
         core.error(error);
         throw new Error(error);
     }
-    core.debug('Configuration validation successful');
+    core.debug("Configuration validation successful");
 }
 /**
  * Processes a file's diff and generates review comments
@@ -230,7 +269,7 @@ function validateConfig() {
  */
 function processFile(file, prDetails) {
     return __awaiter(this, void 0, void 0, function* () {
-        const filePath = file.to || file.from || 'unknown';
+        const filePath = file.to || file.from || "unknown";
         core.debug(`Beginning to process file: ${filePath}`);
         if ((0, utils_1.isFileTooLarge)(file)) {
             core.info(`Skipping file ${filePath}: File exceeds size limits`);
@@ -242,13 +281,13 @@ function processFile(file, prDetails) {
         const mergedChunks = [];
         let currentChunk = null;
         // First, analyze the full file chunk distribution
-        const chunkDistribution = file.chunks.map(chunk => ({
+        const chunkDistribution = file.chunks.map((chunk) => ({
             start: chunk.newStart,
             end: chunk.newStart + chunk.newLines - 1,
             lines: chunk.newLines + chunk.oldLines,
-            chunk
+            chunk,
         }));
-        core.debug(`Chunk distribution in file: ${JSON.stringify(chunkDistribution.map(c => ({ start: c.start, end: c.end, lines: c.lines })))}`);
+        core.debug(`Chunk distribution in file: ${JSON.stringify(chunkDistribution.map((c) => ({ start: c.start, end: c.end, lines: c.lines })))}`);
         // Check for large gaps between chunks
         const hasLargeGaps = chunkDistribution.some((chunk, idx) => {
             if (idx === 0)
@@ -273,7 +312,7 @@ function processFile(file, prDetails) {
             // Decide whether to merge based on several factors
             const currentTotalLines = currentChunk.newLines + currentChunk.oldLines;
             const nextTotalLines = chunk.newLines + chunk.oldLines;
-            const mergedWouldBeTooLarge = (currentTotalLines + nextTotalLines) > config_1.MAX_CHUNK_TOTAL_LINES * 0.8;
+            const mergedWouldBeTooLarge = currentTotalLines + nextTotalLines > config_1.MAX_CHUNK_TOTAL_LINES * 0.8;
             const gapIsTooLarge = gap > 50; // Don't merge chunks with more than 50 lines between them
             if (!mergedWouldBeTooLarge && !gapIsTooLarge) {
                 // Calculate virtual lines for the gap
@@ -284,20 +323,16 @@ function processFile(file, prDetails) {
                     const contextLines = Math.min(gap, 5);
                     for (let j = 0; j < contextLines; j++) {
                         virtualGapChanges.push({
-                            type: 'normal',
+                            type: "normal",
                             content: `// Context line ${j + 1} of ${contextLines}`,
-                            normal: true
+                            normal: true,
                         });
                     }
                 }
                 // Merge the chunks with any virtual context
-                currentChunk.newLines = (chunk.newStart + chunk.newLines) - currentChunk.newStart;
+                currentChunk.newLines = chunk.newStart + chunk.newLines - currentChunk.newStart;
                 currentChunk.oldLines += chunk.oldLines;
-                currentChunk.changes = [
-                    ...currentChunk.changes,
-                    ...virtualGapChanges,
-                    ...chunk.changes
-                ];
+                currentChunk.changes = [...currentChunk.changes, ...virtualGapChanges, ...chunk.changes];
             }
             else {
                 // Don't merge - add current chunk and start a new one
@@ -337,9 +372,7 @@ function processFile(file, prDetails) {
             // Create a prompt for the AI
             const prompt = (0, ai_1.createPrompt)(file, chunk, prDetails);
             // Log prompt summary instead of full content
-            const promptPreview = prompt.length > 100
-                ? prompt.substring(0, 100) + `... (total length: ${prompt.length} chars)`
-                : prompt;
+            const promptPreview = prompt.length > 100 ? prompt.substring(0, 100) + `... (total length: ${prompt.length} chars)` : prompt;
             core.debug(`Prompt preview for chunk ${i + 1}: ${promptPreview}`);
             // Get AI response
             core.debug(`Sending chunk ${i + 1} to AI for review`);
@@ -353,7 +386,7 @@ function processFile(file, prDetails) {
             if (aiResponses.length > 0) {
                 core.debug(`AI response preview: ${JSON.stringify(aiResponses.slice(0, 1))}`);
                 // Check for potentially problematic line numbers ahead of time
-                const invalidLineNums = aiResponses.filter(r => {
+                const invalidLineNums = aiResponses.filter((r) => {
                     const lineNumber = Number(r.lineNumber);
                     return isNaN(lineNumber) || lineNumber < chunk.newStart || lineNumber > chunk.newStart + chunk.newLines - 1;
                 });
@@ -411,7 +444,7 @@ function analyzeCode(parsedDiff, prDetails) {
             const fileBatch = filesToAnalyze.slice(i, i + CONCURRENT_FILES);
             core.info(`Processing batch ${batchNumber} with ${batchSize} files (${i + 1}-${i + batchSize} of ${filesToAnalyze.length})`);
             const fileCommentsPromises = fileBatch.map((file) => __awaiter(this, void 0, void 0, function* () {
-                const filePath = file.to || file.from || 'unknown';
+                const filePath = file.to || file.from || "unknown";
                 if (file.to === "/dev/null") {
                     core.debug(`Skipping deleted file: ${file.from}`);
                     skippedFiles++;
@@ -464,18 +497,18 @@ function main() {
         try {
             core.info("=== Starting AI code review ===");
             // Provide more detailed model information
-            const modelInfo = config_1.AI_PROVIDER === 'openai'
-                ? `${config_1.OPENAI_API_MODEL}${config_1.OPENAI_API_MODEL.startsWith('o3-') ? ' (using max_completion_tokens)' : ' (using max_tokens)'}`
+            const modelInfo = config_1.AI_PROVIDER === "openai"
+                ? `${config_1.OPENAI_API_MODEL}${config_1.OPENAI_API_MODEL.startsWith("o3-") ? " (using max_completion_tokens)" : " (using max_tokens)"}`
                 : config_1.ANTHROPIC_API_MODEL;
             core.info(`Configuration:
 - AI Provider: ${config_1.AI_PROVIDER}
 - Model: ${modelInfo}
-- Max Files: ${config_1.MAX_FILES > 0 ? config_1.MAX_FILES : 'No limit'}
-- Exclude Patterns: ${config_1.EXCLUDE_PATTERNS.length > 0 ? config_1.EXCLUDE_PATTERNS.join(', ') : 'None'}
+- Max Files: ${config_1.MAX_FILES > 0 ? config_1.MAX_FILES : "No limit"}
+- Exclude Patterns: ${config_1.EXCLUDE_PATTERNS.length > 0 ? config_1.EXCLUDE_PATTERNS.join(", ") : "None"}
 - Chunk Size Limits: ${config_1.MAX_CHUNK_TOTAL_LINES} lines
 - File Size Limits: ${config_1.MAX_FILE_TOTAL_LINES} lines`);
             // Add log file path for debugging
-            if (process.env.RUNNER_DEBUG === '1') {
+            if (process.env.RUNNER_DEBUG === "1") {
                 core.info(`Debug mode enabled - full logs will be captured`);
             }
             // Validate configuration
@@ -483,14 +516,14 @@ function main() {
             // Get PR details
             core.info("Fetching event details...");
             const prDetails = yield (0, github_1.getPRDetails)();
-            if (prDetails.eventType === 'pull_request') {
+            if (prDetails.eventType === "pull_request") {
                 core.info(`Processing PR #${prDetails.pull_number} in ${prDetails.owner}/${prDetails.repo}`);
                 core.info(`PR Title: ${prDetails.title}`);
                 if (prDetails.description) {
-                    core.info(`PR Description: ${prDetails.description.slice(0, 100)}${prDetails.description.length > 100 ? '...' : ''}`);
+                    core.info(`PR Description: ${prDetails.description.slice(0, 100)}${prDetails.description.length > 100 ? "..." : ""}`);
                 }
             }
-            else if (prDetails.eventType === 'push') {
+            else if (prDetails.eventType === "push") {
                 core.info(`Processing push to branch "${prDetails.ref}" in ${prDetails.owner}/${prDetails.repo}`);
                 // If the title and description weren't populated yet, get them from the commit data
                 if (prDetails.title === "Push event") {
@@ -503,17 +536,19 @@ function main() {
                         // Use the commit messages for context
                         if (commits.length > 0) {
                             const latestCommit = commits[0];
-                            prDetails.title = latestCommit.message || 'Push event';
+                            prDetails.title = latestCommit.message || "Push event";
                             // Create a description from commit messages
-                            prDetails.description = commits.map((commit, idx) => `${idx + 1}. ${commit.message || 'No message'} (${commit.id.substring(0, 7)})`).join('\n');
-                            core.info(`Latest commit: ${latestCommit.message || 'No message'}`);
+                            prDetails.description = commits
+                                .map((commit, idx) => `${idx + 1}. ${commit.message || "No message"} (${commit.id.substring(0, 7)})`)
+                                .join("\n");
+                            core.info(`Latest commit: ${latestCommit.message || "No message"}`);
                             core.debug(`Using commit messages as context: ${prDetails.description}`);
                         }
                     }
                 }
             }
             else {
-                core.info(`Processing ${prDetails.eventType || 'unknown'} event for ${prDetails.owner}/${prDetails.repo}`);
+                core.info(`Processing ${prDetails.eventType || "unknown"} event for ${prDetails.owner}/${prDetails.repo}`);
                 core.info(`Event Title: ${prDetails.title}`);
             }
             // Get diff
@@ -527,13 +562,13 @@ function main() {
             core.info("Parsing diff...");
             const parsedDiff = (0, parse_diff_1.default)(diff);
             core.info(`\nFound ${parsedDiff.length} changed files:`);
-            parsedDiff.forEach(file => {
-                core.info(`- ${file.to || file.from || 'unknown'} (+${file.additions} -${file.deletions})`);
+            parsedDiff.forEach((file) => {
+                core.info(`- ${file.to || file.from || "unknown"} (+${file.additions} -${file.deletions})`);
             });
             // Summary of file types
             const fileExtensions = new Map();
-            parsedDiff.forEach(file => {
-                const ext = (file.to || "").split('.').pop() || "unknown";
+            parsedDiff.forEach((file) => {
+                const ext = (file.to || "").split(".").pop() || "unknown";
                 fileExtensions.set(ext, (fileExtensions.get(ext) || 0) + 1);
             });
             core.info("File types breakdown:");
@@ -560,21 +595,59 @@ function main() {
                     core.info(`- ${file}: ${count} comment(s)`);
                 }
                 // For push events, we can't create PR reviews, so we'll just log the comments
-                if (prDetails.eventType === 'push') {
+                if (prDetails.eventType === "push") {
                     core.info(`\nThis is a push event, so we'll log comments instead of creating a GitHub review`);
                     // Log the comments in a readable format
                     for (const comment of comments) {
-                        core.info(`\n${comment.path}:${comment.line} - ${comment.body.split('\n')[0]}...`);
+                        core.info(`\n${comment.path}:${comment.line} - ${comment.body.split("\n")[0]}...`);
                     }
                     const duration = (Date.now() - startTime) / 1000;
                     core.info(`\n=== AI code review completed successfully in ${duration.toFixed(2)} seconds ===`);
                     core.info(`Found ${comments.length} issues in ${filteredDiff.length} files`);
                     return;
                 }
-                // For PR events, create the review in GitHub
+                // For PR events, check for existing comments to avoid duplicates
+                const existingComments = yield (0, github_1.getExistingComments)(prDetails.owner, prDetails.repo, prDetails.pull_number);
+                // Also get existing comment content for semantic similarity checking
+                const existingCommentContent = yield (0, github_1.getExistingCommentContent)(prDetails.owner, prDetails.repo, prDetails.pull_number);
+                // Filter out comments that would be duplicates of existing ones
+                const originalCount = comments.length;
+                const filteredComments = comments.filter((comment) => {
+                    // First check for exact line number duplicates
+                    if (existingComments.has(comment.path)) {
+                        const existingLines = existingComments.get(comment.path);
+                        if (existingLines.has(comment.line)) {
+                            core.debug(`Skipping comment at ${comment.path}:${comment.line} - already has a comment`);
+                            return false;
+                        }
+                    }
+                    // Then check for semantically similar comments
+                    // Filter to only check comments in same file and within reasonable distance
+                    const nearbyComments = existingCommentContent.filter((existing) => existing.path === comment.path && Math.abs(existing.line - comment.line) < 10);
+                    for (const existing of nearbyComments) {
+                        if (isCommentSimilar(comment.body, existing.body)) {
+                            core.debug(`Skipping comment at ${comment.path}:${comment.line} - semantically similar to existing comment at line ${existing.line}`);
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+                // Log stats about filtered comments
+                const skippedCount = originalCount - filteredComments.length;
+                if (skippedCount > 0) {
+                    core.info(`Skipped ${skippedCount} comments that would duplicate existing comments`);
+                }
+                // If all comments were duplicates, we're done
+                if (filteredComments.length === 0) {
+                    core.info(`All ${originalCount} potential comments were duplicates of existing comments - nothing to add`);
+                    const duration = (Date.now() - startTime) / 1000;
+                    core.info(`\n=== AI code review completed successfully in ${duration.toFixed(2)} seconds ===`);
+                    return;
+                }
+                // For PR events, create the review in GitHub with non-duplicate comments
                 try {
-                    core.info("Submitting review to GitHub...");
-                    yield (0, github_1.createReviewComment)(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+                    core.info(`Submitting review with ${filteredComments.length} comments to GitHub...`);
+                    yield (0, github_1.createReviewComment)(prDetails.owner, prDetails.repo, prDetails.pull_number, filteredComments);
                     core.info("Review successfully submitted to GitHub");
                 }
                 catch (error) {
@@ -582,8 +655,8 @@ function main() {
                     core.error(`Failed to create review: ${error instanceof Error ? error.message : String(error)}`);
                     // Log the comments so they're not lost
                     core.info("\nHere are the comments that couldn't be submitted:");
-                    for (const comment of comments) {
-                        core.info(`\n${comment.path}:${comment.line} - ${comment.body.split('\n')[0]}...`);
+                    for (const comment of filteredComments) {
+                        core.info(`\n${comment.path}:${comment.line} - ${comment.body.split("\n")[0]}...`);
                     }
                 }
             }
@@ -695,7 +768,7 @@ const anthropic = new sdk_1.default({
  * Creates a prompt for the AI based on the file and chunk
  */
 function createPrompt(file, chunk, prDetails) {
-    const filePath = file.to || file.from || 'unknown';
+    const filePath = file.to || file.from || "unknown";
     const language = (0, utils_1.getLanguageFromPath)(filePath);
     // Log condensed chunk info rather than full content
     core.debug(`Creating prompt for ${filePath} (${language}): chunk with ${chunk.changes.length} changes, newLines=${chunk.newLines}, oldLines=${chunk.oldLines}`);
@@ -787,17 +860,19 @@ function getOpenAIResponse(prompt, chunk) {
     var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
         // Check if using o3 model family and adjust parameters accordingly
-        const isOModel = config_1.OPENAI_API_MODEL.startsWith('o');
+        const isOModel = config_1.OPENAI_API_MODEL.startsWith("o");
         // Base configuration for the API request - different for o3 and other models
-        const baseConfig = isOModel ? {
-            model: config_1.OPENAI_API_MODEL,
-            max_completion_tokens: config_1.DEFAULT_MAX_TOKENS * 2,
-            response_format: { type: "json_object" }, // Using const assertion for type safety
-        } : {
-            model: config_1.OPENAI_API_MODEL,
-            temperature: 0.2,
-            max_tokens: config_1.DEFAULT_MAX_TOKENS * 2, // Double the token limit to ensure complete responses
-        };
+        const baseConfig = isOModel
+            ? {
+                model: config_1.OPENAI_API_MODEL,
+                max_completion_tokens: config_1.DEFAULT_MAX_TOKENS * 2,
+                response_format: { type: "json_object" }, // Using const assertion for type safety
+            }
+            : {
+                model: config_1.OPENAI_API_MODEL,
+                temperature: 0.2,
+                max_tokens: config_1.DEFAULT_MAX_TOKENS * 2, // Double the token limit to ensure complete responses
+            };
         // Adjust tokens based on chunk size
         let maxTokens = config_1.DEFAULT_MAX_TOKENS;
         if (chunk) {
@@ -807,7 +882,7 @@ function getOpenAIResponse(prompt, chunk) {
             }
         }
         try {
-            core.debug(`Sending request to OpenAI API with model: ${config_1.OPENAI_API_MODEL} and ${isOModel ? 'max_completion_tokens' : 'max_tokens'}: ${maxTokens}`);
+            core.debug(`Sending request to OpenAI API with model: ${config_1.OPENAI_API_MODEL} and ${isOModel ? "max_completion_tokens" : "max_tokens"}: ${maxTokens}`);
             const updatedConfig = Object.assign({}, baseConfig);
             // Set the appropriate token parameter based on model
             if (isOModel) {
@@ -854,18 +929,18 @@ function getOpenAIResponse(prompt, chunk) {
                     object: response.object,
                     model: response.model,
                     created: response.created,
-                    choices: response.choices.map(c => {
+                    choices: response.choices.map((c) => {
                         var _a, _b;
                         return ({
                             index: c.index,
                             finish_reason: c.finish_reason,
-                            content_length: ((_b = (_a = c.message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.length) || 0
+                            content_length: ((_b = (_a = c.message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.length) || 0,
                         });
-                    })
+                    }),
                 }, null, 2)}`);
                 // Log the raw content that failed to parse - only a limited preview in normal logs
                 const previewLength = 200;
-                core.error(`Content preview (${content.length} chars): ${content.substring(0, previewLength)}${content.length > previewLength ? '...' : ''}`);
+                core.error(`Content preview (${content.length} chars): ${content.substring(0, previewLength)}${content.length > previewLength ? "..." : ""}`);
                 // But log full content in debug for troubleshooting
                 core.debug(`Full content that failed to parse (${content.length} chars): ${content}`);
                 // Attempt to salvage JSON if it's truncated
@@ -874,7 +949,7 @@ function getOpenAIResponse(prompt, chunk) {
                     // Log the content length
                     core.debug(`Content length: ${content.length} characters`);
                     // Try to find the last complete review object without using 's' flag
-                    const contentNoNewlines = content.replace(/\n/g, ' ');
+                    const contentNoNewlines = content.replace(/\n/g, " ");
                     const lastCompleteReviewMatch = contentNoNewlines.match(/"reviews"\s*:\s*\[\s*(.*?)(\}\s*\]|\}\s*,\s*\{)/);
                     if (lastCompleteReviewMatch && lastCompleteReviewMatch[1]) {
                         // Create a valid JSON structure with just the first complete review
@@ -899,7 +974,7 @@ function getOpenAIResponse(prompt, chunk) {
                         for (const objStr of objectMatches) {
                             try {
                                 const obj = JSON.parse(objStr);
-                                if (obj && typeof obj === 'object' && (0, utils_1.validateAIResponse)(obj)) {
+                                if (obj && typeof obj === "object" && (0, utils_1.validateAIResponse)(obj)) {
                                     validObjects.push(obj);
                                 }
                             }
@@ -946,13 +1021,13 @@ function getAnthropicResponse(prompt) {
             core.debug(`Sending request to Anthropic API with model: ${config_1.ANTHROPIC_API_MODEL}`);
             // Adjust max tokens based on model
             let maxTokens = 1024;
-            if (config_1.ANTHROPIC_API_MODEL.includes('haiku')) {
+            if (config_1.ANTHROPIC_API_MODEL.includes("haiku")) {
                 maxTokens = 800;
             }
-            else if (config_1.ANTHROPIC_API_MODEL.includes('sonnet')) {
+            else if (config_1.ANTHROPIC_API_MODEL.includes("sonnet")) {
                 maxTokens = 4096;
             }
-            else if (config_1.ANTHROPIC_API_MODEL.includes('opus')) {
+            else if (config_1.ANTHROPIC_API_MODEL.includes("opus")) {
                 maxTokens = 8192;
             }
             core.debug(`Using max_tokens: ${maxTokens} for Anthropic model: ${config_1.ANTHROPIC_API_MODEL}`);
@@ -969,8 +1044,8 @@ function getAnthropicResponse(prompt) {
                 ],
             }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "anthropic-api");
             // Minimal logging during normal operation
-            const contentBlocks = ((_a = response.content) === null || _a === void 0 ? void 0 : _a.filter(block => block.type === 'text')) || [];
-            const totalLength = contentBlocks.reduce((sum, block) => sum + ('text' in block ? block.text.length : 0), 0);
+            const contentBlocks = ((_a = response.content) === null || _a === void 0 ? void 0 : _a.filter((block) => block.type === "text")) || [];
+            const totalLength = contentBlocks.reduce((sum, block) => sum + ("text" in block ? block.text.length : 0), 0);
             core.debug(`Anthropic response: model=${response.model}, stop_reason=${response.stop_reason}, content_blocks=${contentBlocks.length}, total_length=${totalLength}`);
             // Process the content blocks from the response
             let textContent = "";
@@ -978,7 +1053,7 @@ function getAnthropicResponse(prompt) {
             if (response.content && Array.isArray(response.content)) {
                 // Find text blocks and concatenate their content
                 for (const block of response.content) {
-                    if (block.type === 'text' && 'text' in block) {
+                    if (block.type === "text" && "text" in block) {
                         textContent += block.text;
                     }
                 }
@@ -1007,11 +1082,11 @@ function getAnthropicResponse(prompt) {
                     stop_reason: response.stop_reason,
                     stop_sequence: response.stop_sequence,
                     usage: response.usage,
-                    content_blocks: ((_b = response.content) === null || _b === void 0 ? void 0 : _b.length) || 0
+                    content_blocks: ((_b = response.content) === null || _b === void 0 ? void 0 : _b.length) || 0,
                 }, null, 2)}`);
                 // Log content preview in error logs
                 const previewLength = 200;
-                core.error(`Content preview (${textContent.length} chars): ${textContent.substring(0, previewLength)}${textContent.length > previewLength ? '...' : ''}`);
+                core.error(`Content preview (${textContent.length} chars): ${textContent.substring(0, previewLength)}${textContent.length > previewLength ? "..." : ""}`);
                 // Full content in debug logs
                 core.debug(`Full content that failed to parse (${textContent.length} chars): ${textContent}`);
                 return null;
@@ -1047,7 +1122,7 @@ function createComment(file, chunk, aiResponse) {
         return null;
     }
     // Validate AI response
-    if (!aiResponse || typeof aiResponse !== 'object') {
+    if (!aiResponse || typeof aiResponse !== "object") {
         core.error(`Invalid AI response format: ${JSON.stringify(aiResponse)}`);
         return null;
     }
@@ -1075,7 +1150,7 @@ function createComment(file, chunk, aiResponse) {
             // Replace code blocks with properly formatted ones
             formattedComment = formattedComment.replace(codeBlockRegex, (match, lang, code) => {
                 // If no language is specified, try to detect it from the file extension
-                const language = lang || (0, utils_1.getLanguageFromPath)(file.to || '').toLowerCase();
+                const language = lang || (0, utils_1.getLanguageFromPath)(file.to || "").toLowerCase();
                 return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
             });
         }
@@ -1084,7 +1159,7 @@ function createComment(file, chunk, aiResponse) {
             path: file.to,
             line: adjustedLineNumber,
             body: formattedComment,
-            side: 'RIGHT'
+            side: "RIGHT",
         };
     }
     // Format the comment body to properly handle code suggestions
@@ -1095,7 +1170,7 @@ function createComment(file, chunk, aiResponse) {
         // Replace code blocks with properly formatted ones
         formattedComment = formattedComment.replace(codeBlockRegex, (match, lang, code) => {
             // If no language is specified, try to detect it from the file extension
-            const language = lang || (0, utils_1.getLanguageFromPath)(file.to || '').toLowerCase();
+            const language = lang || (0, utils_1.getLanguageFromPath)(file.to || "").toLowerCase();
             return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
         });
     }
@@ -1104,7 +1179,7 @@ function createComment(file, chunk, aiResponse) {
         path: file.to,
         line: lineNumber,
         body: formattedComment,
-        side: 'RIGHT' // We always comment on the new version
+        side: "RIGHT", // We always comment on the new version
     };
 }
 exports.createComment = createComment;
@@ -1153,7 +1228,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.createReviewComment = exports.getDiff = exports.getPRDetails = void 0;
+exports.getExistingComments = exports.getExistingCommentContent = exports.createReviewComment = exports.getDiff = exports.getPRDetails = void 0;
 const fs_1 = __nccwpck_require__(7147);
 const core = __importStar(__nccwpck_require__(2186));
 const rest_1 = __nccwpck_require__(5375);
@@ -1191,7 +1266,7 @@ function getPRDetails() {
                     pull_number: number,
                     title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
                     description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
-                    eventType: 'pull_request'
+                    eventType: "pull_request",
                 };
             }
             else if (eventData.commits && eventData.commits.length > 0) {
@@ -1207,24 +1282,24 @@ function getPRDetails() {
                     pull_number: 0,
                     title: "Push event",
                     description: "",
-                    ref: ref === null || ref === void 0 ? void 0 : ref.replace('refs/heads/', ''),
+                    ref: ref === null || ref === void 0 ? void 0 : ref.replace("refs/heads/", ""),
                     commit: after,
-                    eventType: 'push'
+                    eventType: "push",
                 };
             }
             else {
                 // Handle other event types gracefully
-                let owner = '';
-                let repo = '';
+                let owner = "";
+                let repo = "";
                 // Try to extract repository info from various places in the event data
                 if (eventData.repository) {
-                    owner = ((_c = eventData.repository.owner) === null || _c === void 0 ? void 0 : _c.login) || ((_d = eventData.repository.owner) === null || _d === void 0 ? void 0 : _d.name) || '';
-                    repo = eventData.repository.name || '';
+                    owner = ((_c = eventData.repository.owner) === null || _c === void 0 ? void 0 : _c.login) || ((_d = eventData.repository.owner) === null || _d === void 0 ? void 0 : _d.name) || "";
+                    repo = eventData.repository.name || "";
                 }
                 // Fallback to environment variables if necessary
                 if (!owner || !repo) {
-                    const githubRepository = process.env.GITHUB_REPOSITORY || '';
-                    const [repoOwner, repoName] = githubRepository.split('/');
+                    const githubRepository = process.env.GITHUB_REPOSITORY || "";
+                    const [repoOwner, repoName] = githubRepository.split("/");
                     owner = owner || repoOwner;
                     repo = repo || repoName;
                 }
@@ -1236,8 +1311,8 @@ function getPRDetails() {
                     repo,
                     pull_number: 0,
                     title: "GitHub event",
-                    description: `Event type: ${eventData.action || 'unknown'}`,
-                    eventType: 'other'
+                    description: `Event type: ${eventData.action || "unknown"}`,
+                    eventType: "other",
                 };
             }
         }
@@ -1259,7 +1334,7 @@ function getDiff(owner, repo, pull_number) {
             }
             const eventData = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH, "utf8"));
             // Log the event type for debugging
-            const eventType = eventData.action || (eventData.commits ? 'push' : 'unknown');
+            const eventType = eventData.action || (eventData.commits ? "push" : "unknown");
             core.debug(`Processing GitHub event type: ${eventType}`);
             // If this is a pull request event, get the diff from the event payload
             if (eventData.pull_request) {
@@ -1283,19 +1358,19 @@ function getDiff(owner, repo, pull_number) {
                     throw new Error("Missing commit information in event payload");
                 }
                 // If it's the first commit in a repo, use a different approach
-                if (baseCommit === '0000000000000000000000000000000000000000') {
+                if (baseCommit === "0000000000000000000000000000000000000000") {
                     core.debug(`First commit detected: ${currentCommit}`);
                     // Get the commit details to get its files
                     const response = yield (0, retry_1.withRetry)(() => octokit.repos.getCommit({
                         owner,
                         repo,
-                        ref: currentCommit
+                        ref: currentCommit,
                     }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-commit");
                     // Construct a proper diff for each file in the commit
                     let manualDiff = "";
                     for (const file of response.data.files || []) {
                         manualDiff += `diff --git a/${file.filename} b/${file.filename}\n`;
-                        if (file.status === 'added') {
+                        if (file.status === "added") {
                             manualDiff += `new file mode 100644\n`;
                             manualDiff += `index 0000000..${file.sha.substring(0, 7)}\n`;
                             manualDiff += `--- /dev/null\n`;
@@ -1306,13 +1381,13 @@ function getDiff(owner, repo, pull_number) {
                                     owner,
                                     repo,
                                     path: file.filename,
-                                    ref: currentCommit
+                                    ref: currentCommit,
                                 }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-content");
-                                if ('content' in contentResponse.data && contentResponse.data.content) {
-                                    const content = Buffer.from(contentResponse.data.content, 'base64').toString('utf8');
-                                    const lines = content.split('\n');
+                                if ("content" in contentResponse.data && contentResponse.data.content) {
+                                    const content = Buffer.from(contentResponse.data.content, "base64").toString("utf8");
+                                    const lines = content.split("\n");
                                     manualDiff += `@@ -0,0 +1,${lines.length} @@\n`;
-                                    lines.forEach(line => {
+                                    lines.forEach((line) => {
                                         manualDiff += `+${line}\n`;
                                     });
                                 }
@@ -1328,7 +1403,7 @@ function getDiff(owner, repo, pull_number) {
                                 manualDiff += `+// Added ${file.additions} lines (content not available)\n`;
                             }
                         }
-                        else if (file.status === 'modified') {
+                        else if (file.status === "modified") {
                             manualDiff += `index ${file.sha.substring(0, 7)}..${file.sha.substring(0, 7)} 100644\n`;
                             manualDiff += `--- a/${file.filename}\n`;
                             manualDiff += `+++ b/${file.filename}\n`;
@@ -1341,7 +1416,7 @@ function getDiff(owner, repo, pull_number) {
                                 manualDiff += `// Modified file with ${file.additions} additions and ${file.deletions} deletions\n`;
                             }
                         }
-                        else if (file.status === 'removed') {
+                        else if (file.status === "removed") {
                             manualDiff += `deleted file mode 100644\n`;
                             manualDiff += `index ${file.sha.substring(0, 7)}..0000000\n`;
                             manualDiff += `--- a/${file.filename}\n`;
@@ -1389,16 +1464,16 @@ function createReviewComment(owner, repo, pull_number, comments) {
                 throw new Error("Failed to get commit ID from pull request");
             }
             // Get the diff to validate file paths and line numbers
-            const prDiff = yield (0, retry_1.withRetry)(() => octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
+            const prDiff = yield (0, retry_1.withRetry)(() => octokit.request("GET /repos/{owner}/{repo}/pulls/{pull_number}", {
                 owner,
                 repo,
                 pull_number,
                 mediaType: {
-                    format: 'diff'
-                }
+                    format: "diff",
+                },
             }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-diff");
             const parsedDiff = (0, parse_diff_1.default)(prDiff.data);
-            const validFiles = new Set(parsedDiff.map(file => file.to).filter(Boolean));
+            const validFiles = new Set(parsedDiff.map((file) => file.to).filter(Boolean));
             // Enhanced validation with diff awareness
             const validatedComments = yield Promise.all(comments.map((comment) => __awaiter(this, void 0, void 0, function* () {
                 // Additional logging for each comment being validated
@@ -1409,22 +1484,24 @@ function createReviewComment(owner, repo, pull_number, comments) {
                     return null;
                 }
                 // Find the file in the diff
-                const diffFile = parsedDiff.find(file => file.to === comment.path);
+                const diffFile = parsedDiff.find((file) => file.to === comment.path);
                 if (!diffFile) {
                     core.warning(`File ${comment.path} not found in parsed diff - skipping comment`);
                     return null;
                 }
                 // Check if the line number is within any chunk's range
-                const isLineInAnyChunk = diffFile.chunks.some(chunk => {
+                const isLineInAnyChunk = diffFile.chunks.some((chunk) => {
                     const chunkEndLine = chunk.newStart + chunk.newLines - 1;
                     return comment.line >= chunk.newStart && comment.line <= chunkEndLine;
                 });
                 if (!isLineInAnyChunk) {
                     core.warning(`Line ${comment.line} in file ${comment.path} not found in any diff chunk - skipping comment`);
                     // Log the available chunks for debugging
-                    const chunkRanges = diffFile.chunks.map(chunk => {
+                    const chunkRanges = diffFile.chunks
+                        .map((chunk) => {
                         return `${chunk.newStart}-${chunk.newStart + chunk.newLines - 1}`;
-                    }).join(', ');
+                    })
+                        .join(", ");
                     core.debug(`Available chunks in ${comment.path}: ${chunkRanges}`);
                     // Attempt to validate line against full file content via GitHub API
                     try {
@@ -1434,20 +1511,20 @@ function createReviewComment(owner, repo, pull_number, comments) {
                             owner,
                             repo,
                             path: comment.path,
-                            ref: commitId
+                            ref: commitId,
                         }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-content");
-                        if ('content' in fileContentResponse.data && fileContentResponse.data.content) {
-                            const fileContent = Buffer.from(fileContentResponse.data.content, 'base64').toString('utf8');
-                            const fileLines = fileContent.split('\n');
+                        if ("content" in fileContentResponse.data && fileContentResponse.data.content) {
+                            const fileContent = Buffer.from(fileContentResponse.data.content, "base64").toString("utf8");
+                            const fileLines = fileContent.split("\n");
                             if (comment.line <= fileLines.length) {
                                 core.info(`Line ${comment.line} exists in full file (outside diff chunks) - keeping comment`);
                                 // Adjust comment to point to a valid line in the diff if possible
                                 const nearestChunk = diffFile.chunks
-                                    .map(chunk => ({
+                                    .map((chunk) => ({
                                     chunk,
                                     start: chunk.newStart,
                                     end: chunk.newStart + chunk.newLines - 1,
-                                    distance: Math.min(Math.abs(comment.line - chunk.newStart), Math.abs(comment.line - (chunk.newStart + chunk.newLines - 1)))
+                                    distance: Math.min(Math.abs(comment.line - chunk.newStart), Math.abs(comment.line - (chunk.newStart + chunk.newLines - 1))),
                                 }))
                                     .sort((a, b) => a.distance - b.distance)[0];
                                 if (nearestChunk) {
@@ -1468,7 +1545,7 @@ function createReviewComment(owner, repo, pull_number, comments) {
                     return null;
                 }
                 // Validate other aspects
-                if (typeof comment.line !== 'number' || comment.line <= 0) {
+                if (typeof comment.line !== "number" || comment.line <= 0) {
                     core.warning(`Invalid line number ${comment.line} for file ${comment.path} - skipping comment`);
                     return null;
                 }
@@ -1480,7 +1557,7 @@ function createReviewComment(owner, repo, pull_number, comments) {
                 return comment;
             })));
             // Filter out null values from the validated comments
-            const filteredComments = validatedComments.filter(comment => comment !== null);
+            const filteredComments = validatedComments.filter((comment) => comment !== null);
             if (filteredComments.length === 0) {
                 core.warning("No valid comments after enhanced validation");
                 if (comments.length > 0) {
@@ -1508,7 +1585,7 @@ function createReviewComment(owner, repo, pull_number, comments) {
             for (const batch of batches) {
                 try {
                     // Validate batch before sending
-                    const validBatch = batch.filter(comment => {
+                    const validBatch = batch.filter((comment) => {
                         // Additional validation for the batch
                         if (!comment.path || !comment.body || !comment.line) {
                             core.warning(`Invalid comment in batch: ${JSON.stringify(comment)}`);
@@ -1527,21 +1604,19 @@ function createReviewComment(owner, repo, pull_number, comments) {
                         pull_number,
                         commit_id: commitId,
                         event: "COMMENT",
-                        comments: validBatch.map(comment => ({
+                        comments: validBatch.map((comment) => ({
                             path: comment.path,
                             body: comment.body,
                             line: comment.line,
-                            side: comment.side || 'RIGHT'
-                        }))
+                            side: comment.side || "RIGHT",
+                        })),
                     }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-create-review");
                     successCount += validBatch.length;
                     // If some comments were filtered out, track them as failures
                     if (validBatch.length < batch.length) {
                         const filtered = batch.length - validBatch.length;
                         failureCount += filtered;
-                        failedComments.push(...batch.filter(comment => !validBatch.some(valid => valid.path === comment.path &&
-                            valid.line === comment.line &&
-                            valid.body === comment.body)));
+                        failedComments.push(...batch.filter((comment) => !validBatch.some((valid) => valid.path === comment.path && valid.line === comment.line && valid.body === comment.body)));
                     }
                 }
                 catch (error) {
@@ -1555,7 +1630,7 @@ function createReviewComment(owner, repo, pull_number, comments) {
                         core.debug(`Full error details: ${JSON.stringify({
                             name: error.name,
                             message: error.message,
-                            stack: error.stack
+                            stack: error.stack,
                         }, null, 2)}`);
                         // Log the request details that caused the failure
                         const errorObj = error;
@@ -1576,12 +1651,12 @@ function createReviewComment(owner, repo, pull_number, comments) {
                         errorMessage.includes("diff hunk")) {
                         core.warning("Attempting to identify and remove problematic comments for future batches");
                         // Log the current batch that failed for debugging
-                        core.debug(`Failed batch comments: ${JSON.stringify(batch.map(comment => {
+                        core.debug(`Failed batch comments: ${JSON.stringify(batch.map((comment) => {
                             var _a;
                             return ({
                                 path: comment.path,
                                 line: comment.line,
-                                bodyLength: ((_a = comment.body) === null || _a === void 0 ? void 0 : _a.length) || 0
+                                bodyLength: ((_a = comment.body) === null || _a === void 0 ? void 0 : _a.length) || 0,
                             });
                         }), null, 2)}`);
                     }
@@ -1595,7 +1670,7 @@ function createReviewComment(owner, repo, pull_number, comments) {
                 core.warning(`Failed to create ${failureCount} comments`);
                 // Log failed comments for debugging (limit to avoid excessive logs)
                 const MAX_FAILED_LOGS = 10;
-                failedComments.slice(0, MAX_FAILED_LOGS).forEach(comment => {
+                failedComments.slice(0, MAX_FAILED_LOGS).forEach((comment) => {
                     core.debug(`Failed comment: ${comment.path}:${comment.line}`);
                 });
                 if (failedComments.length > MAX_FAILED_LOGS) {
@@ -1625,6 +1700,141 @@ function createReviewComment(owner, repo, pull_number, comments) {
     });
 }
 exports.createReviewComment = createReviewComment;
+/**
+ * Fetches existing review comments for the pull request with their content
+ * Used to detect semantically similar comments
+ */
+function getExistingCommentContent(owner, repo, pull_number) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // If this is not a pull request (e.g. push event), return empty array
+            if (pull_number <= 0) {
+                return [];
+            }
+            core.debug("Fetching existing PR comment content for semantic duplicate detection...");
+            // Fetch all active review comments for the PR
+            const activeComments = yield (0, retry_1.withRetry)(() => octokit.pulls.listReviewComments({
+                owner,
+                repo,
+                pull_number,
+                per_page: 100, // Maximum per page to reduce API calls
+            }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-list-review-comments-content");
+            // Also fetch resolved comments to avoid re-reporting resolved issues
+            let resolvedComments;
+            try {
+                resolvedComments = yield (0, retry_1.withRetry)(() => octokit.pulls.listReviewComments({
+                    owner,
+                    repo,
+                    pull_number,
+                    per_page: 100,
+                }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-list-resolved-comments");
+                // Check for comments that are part of reviews marked as resolved
+                // Unfortunately, the GitHub API doesn't directly expose resolved comments,
+                // so we need to infer from the review state and track these separately
+                const reviews = yield (0, retry_1.withRetry)(() => octokit.pulls.listReviews({
+                    owner,
+                    repo,
+                    pull_number,
+                    per_page: 100,
+                }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-list-reviews");
+                core.debug(`Found ${reviews.data.length} reviews, checking for resolved items`);
+                // Get IDs of reviews that have been addressed
+                const resolvedReviewIds = new Set(reviews.data
+                    .filter((review) => review.state === "APPROVED" || review.state === "DISMISSED")
+                    .map((review) => review.id));
+                core.debug(`Found ${resolvedReviewIds.size} resolved or approved reviews`);
+            }
+            catch (error) {
+                core.warning(`Failed to fetch resolved comments: ${error instanceof Error ? error.message : String(error)}`);
+                // In case of error, continue with just the active comments
+                resolvedComments = { data: [] };
+            }
+            // Combine active and resolved comments
+            const allComments = [...activeComments.data, ...resolvedComments.data];
+            // Process all comments
+            const commentInfos = allComments
+                .filter((comment) => comment.path && comment.line && comment.body)
+                .map((comment) => ({
+                path: comment.path,
+                line: comment.line,
+                body: comment.body,
+                url: comment.html_url,
+                id: comment.id,
+            }));
+            // Log a summary of what we found
+            const activeCount = activeComments.data.length;
+            const resolvedCount = resolvedComments.data.length;
+            const filteredOut = allComments.length - commentInfos.length;
+            core.info(`Found ${commentInfos.length} existing comments (${activeCount} active, ${resolvedCount} from resolved reviews)`);
+            if (filteredOut > 0) {
+                core.debug(`Filtered out ${filteredOut} comments that lacked path, line, or body`);
+            }
+            return commentInfos;
+        }
+        catch (error) {
+            core.warning(`Failed to fetch existing PR comment content: ${error instanceof Error ? error.message : String(error)}`);
+            // In case of error, return empty array to continue without semantic duplicate detection
+            return [];
+        }
+    });
+}
+exports.getExistingCommentContent = getExistingCommentContent;
+/**
+ * Fetches existing review comments for the pull request
+ * Used to avoid creating duplicate comments based on line numbers
+ */
+function getExistingComments(owner, repo, pull_number) {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            // If this is not a pull request (e.g. push event), return empty map
+            if (pull_number <= 0) {
+                return new Map();
+            }
+            core.info("Fetching existing PR comments to avoid duplicates...");
+            // Fetch all review comments for the PR
+            const existingComments = yield (0, retry_1.withRetry)(() => octokit.pulls.listReviewComments({
+                owner,
+                repo,
+                pull_number,
+                per_page: 100, // Maximum per page to reduce API calls
+            }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-list-review-comments");
+            // Create a map of file paths to sets of line numbers that already have comments
+            const commentMap = new Map();
+            // Process all comments
+            for (const comment of existingComments.data) {
+                // Skip comments not tied to a specific line or path
+                if (!comment.path || !comment.line)
+                    continue;
+                // Add this path to our map if it doesn't exist
+                if (!commentMap.has(comment.path)) {
+                    commentMap.set(comment.path, new Set());
+                }
+                // Add this line to the set of lines that have comments for this file
+                commentMap.get(comment.path).add(comment.line);
+                // Also track similar lines nearby (within 2 lines) to avoid very similar comments
+                for (let nearbyLine = comment.line - 2; nearbyLine <= comment.line + 2; nearbyLine++) {
+                    if (nearbyLine > 0 && nearbyLine !== comment.line) {
+                        commentMap.get(comment.path).add(nearbyLine);
+                    }
+                }
+            }
+            // Log summary of existing comments
+            let totalExistingComments = 0;
+            commentMap.forEach((lines, path) => {
+                totalExistingComments += lines.size;
+                core.debug(`Found ${lines.size} existing comment lines for file: ${path}`);
+            });
+            core.info(`Found ${existingComments.data.length} existing comments affecting ${totalExistingComments} lines in ${commentMap.size} files`);
+            return commentMap;
+        }
+        catch (error) {
+            core.warning(`Failed to fetch existing PR comments: ${error instanceof Error ? error.message : String(error)}`);
+            // In case of error, return empty map to continue without duplicate detection
+            return new Map();
+        }
+    });
+}
+exports.getExistingComments = getExistingComments;
 
 
 /***/ }),
@@ -1773,7 +1983,7 @@ const config_1 = __nccwpck_require__(6730);
  * Helper function to delay execution
  */
 function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 exports.delay = delay;
 /**
@@ -1805,8 +2015,8 @@ exports.isChunkTooLarge = isChunkTooLarge;
  */
 function getLanguageFromPath(filePath) {
     var _a;
-    const extension = ((_a = filePath.split('.').pop()) === null || _a === void 0 ? void 0 : _a.toLowerCase()) || '';
-    return config_1.LANGUAGE_MAP[extension] || 'Unknown';
+    const extension = ((_a = filePath.split(".").pop()) === null || _a === void 0 ? void 0 : _a.toLowerCase()) || "";
+    return config_1.LANGUAGE_MAP[extension] || "Unknown";
 }
 exports.getLanguageFromPath = getLanguageFromPath;
 /**
@@ -1821,20 +2031,21 @@ function validateAIResponse(response) {
     }
     // Validate review comment is not empty and has reasonable length
     if (!response.reviewComment || response.reviewComment.trim().length === 0) {
-        core.warning('Empty review comment received from AI');
+        core.warning("Empty review comment received from AI");
         return false;
     }
-    if (response.reviewComment.length > 65536) { // GitHub's max comment length
-        core.warning('Review comment exceeds GitHub\'s maximum length');
+    if (response.reviewComment.length > 65536) {
+        // GitHub's max comment length
+        core.warning("Review comment exceeds GitHub's maximum length");
         return false;
     }
     // Validate file path exists and is a string
-    if (!response.filePath || typeof response.filePath !== 'string') {
-        core.warning('Invalid or missing file path in AI response');
+    if (!response.filePath || typeof response.filePath !== "string") {
+        core.warning("Invalid or missing file path in AI response");
         return false;
     }
     // Validate severity is one of the allowed values
-    const validSeverities = ['error', 'warning', 'info'];
+    const validSeverities = ["error", "warning", "info"];
     if (!validSeverities.includes(response.severity)) {
         core.warning(`Invalid severity level in AI response: ${response.severity}`);
         return false;

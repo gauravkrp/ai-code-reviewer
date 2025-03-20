@@ -9,6 +9,8 @@ review process.
 - Reviews pull requests using OpenAI's GPT-4 or Anthropic's Claude models.
 - Provides intelligent comments and suggestions for improving your code.
 - Filters out files that match specified exclude patterns.
+- Supports both pull requests and direct code pushes to branches.
+- Avoids duplicate comments by tracking existing issues and resolved items.
 - Easy to set up and integrate into your GitHub workflow.
 
 ## Setup
@@ -31,6 +33,12 @@ on:
     types:
       - opened
       - synchronize
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+      - 'bugfix/**'
 permissions: write-all
 jobs:
   review:
@@ -43,9 +51,13 @@ jobs:
         uses: freeedcom/ai-codereviewer@main
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AI_PROVIDER: "openai" # Optional: defaults to "openai"
+          AI_PROVIDER: ${{ vars.AI_PROVIDER || 'openai' }}
+          # OpenAI configuration
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_MODEL: "gpt-4-1106-preview" # Optional: defaults to "gpt-4"
+          OPENAI_API_MODEL: ${{ vars.OPENAI_API_MODEL || 'gpt-4-1106-preview' }}
+          # Anthropic configuration
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_MODEL: ${{ vars.ANTHROPIC_API_MODEL || 'claude-3-7-sonnet-20250219' }}
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
 ```
 
@@ -66,6 +78,11 @@ on:
     types:
       - opened
       - synchronize
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
 permissions: write-all
 jobs:
   review:
@@ -126,6 +143,25 @@ jobs:
 
 The AI Code Reviewer GitHub Action retrieves the pull request diff, filters out excluded files, and sends code chunks to
 the selected AI provider (OpenAI or Anthropic). It then generates review comments based on the AI's response and adds them to the pull request.
+
+### Support for Code Pushes
+
+In addition to pull request reviews, the action can also analyze code changes pushed directly to branches. When detecting a push event:
+
+1. It retrieves only the diff from the specific commits that were pushed
+2. For the first commit in a repository, it properly handles the special case
+3. Instead of creating PR review comments (which aren't available for pushes), it outputs the analysis in the action logs
+
+### Duplicate Comment Prevention
+
+To avoid creating redundant feedback, the action implements intelligent comment deduplication:
+
+1. **Line-based detection**: Skips comments on lines that already have existing comments
+2. **Semantic similarity**: Detects when a new comment is semantically similar to an existing one (even if on slightly different lines)
+3. **Resolved comment tracking**: Avoids re-suggesting issues that have already been resolved in previous reviews
+4. **Proximity awareness**: Considers nearby lines when determining whether a comment would be redundant
+
+This ensures that the review process remains helpful without creating noise from repeated suggestions.
 
 ## Contributing
 
