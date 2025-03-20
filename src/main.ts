@@ -13,6 +13,8 @@ import {
 	MAX_CHUNK_TOTAL_LINES,
 	MAX_FILE_TOTAL_LINES,
 	ENABLE_SUMMARY,
+	ENABLE_AUTO_FIX,
+	SUGGESTION_STRATEGY
 } from "./config";
 import { isFileTooLarge, isChunkTooLarge } from "./utils";
 import {
@@ -25,6 +27,7 @@ import {
 import { getAIResponse, createComment, createPrompt, generateReviewSummary } from "./services/ai";
 import { readFileSync } from "fs";
 import { getCommentHistory, storeCommentHistory, trackCommonIssue } from "./services/cache";
+import { tryAutomaticFix } from "./utils/auto-fix";
 
 // Constants for configuration
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
@@ -332,14 +335,30 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
 
 		// Process each AI response and create comments
 		for (const response of aiResponses) {
-			const comment = createComment(file, chunk, response);
+			// Apply suggestion strategy
+			let processedResponse = response;
+			
+			if (SUGGESTION_STRATEGY === "ai-only") {
+				// Use only AI suggestions, no auto-fix
+				// processedResponse = response (unchanged)
+			} else if (SUGGESTION_STRATEGY === "auto-fix-first" && ENABLE_AUTO_FIX) {
+				// Try auto-fix first, fallback to AI suggestion
+				processedResponse = tryAutomaticFix(file, chunk, response);
+			} else if (SUGGESTION_STRATEGY === "ai-first" && ENABLE_AUTO_FIX) {
+				// Use AI suggestion if present, otherwise try auto-fix
+				if (!response.suggestion || !response.suggestion.code) {
+					processedResponse = tryAutomaticFix(file, chunk, response);
+				}
+			}
+			
+			const comment = createComment(file, chunk, processedResponse);
 
 			if (comment !== null) {
 				core.debug(`Added comment at line ${comment.line} in ${comment.path}`);
 				comments.push(comment);
 			} else {
-				core.error(`Failed to create comment for line ${response.lineNumber} in ${file.to}`);
-				core.debug(`Response that failed: ${JSON.stringify(response)}`);
+				core.error(`Failed to create comment for line ${processedResponse.lineNumber} in ${file.to}`);
+				core.debug(`Response that failed: ${JSON.stringify(processedResponse)}`);
 			}
 		}
 	}
@@ -349,12 +368,10 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
 }
 
 /**
- * Analyzes code diffs using AI and generates review comments
- * Orchestrates the processing of all files in the diff, with concurrency control
- *
- * @param parsedDiff - Array of files from the parsed diff
- * @param prDetails - Pull request details
- * @returns Array of all review comments across files
+ * Analyzes code and generates review comments
+ * @param parsedDiff Array of files from parsed diff
+ * @param prDetails PR details
+ * @returns Array of review comments
  */
 async function analyzeCode(parsedDiff: File[], prDetails: PRDetails): Promise<ReviewComment[]> {
 	const comments: ReviewComment[] = [];

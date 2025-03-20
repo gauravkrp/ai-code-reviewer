@@ -26,6 +26,22 @@ inputs:
     description: "Glob patterns to exclude files from the diff analysis"
     required: false
     default: ""
+  ENABLE_SUMMARY:
+    description: "Whether to generate a summary of all review findings"
+    required: false
+    default: "true"
+  ENABLE_AUTO_FIX:
+    description: "Whether to generate automated fixes for common issues"
+    required: false
+    default: "true"
+  SUGGESTION_STRATEGY:
+    description: "How to prioritize suggestions: auto-fix-first, ai-first, or ai-only"
+    required: false
+    default: "auto-fix-first"
+  REVIEW_FOCUS:
+    description: "Areas to focus on during review, comma-separated (e.g., security,performance,bugs)"
+    required: false
+    default: ""
   CACHE_ENABLED:
     description: "Whether to use GitHub Actions cache for AI responses and comment history"
     required: false

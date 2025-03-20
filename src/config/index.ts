@@ -18,6 +18,10 @@ export const EXCLUDE_PATTERNS: string[] = core
 
 // Features Configuration
 export const ENABLE_SUMMARY: boolean = core.getInput("ENABLE_SUMMARY") !== "false"; // Enabled by default
+export const ENABLE_AUTO_FIX: boolean = core.getInput("ENABLE_AUTO_FIX") !== "false"; // Enabled by default
+
+// Suggestion Strategy: 'auto-fix-first', 'ai-first', or 'ai-only'
+export const SUGGESTION_STRATEGY: string = core.getInput("SUGGESTION_STRATEGY") || "auto-fix-first";
 
 // Review Focus Configuration - what areas to focus on during review
 export const REVIEW_FOCUS: string[] = core

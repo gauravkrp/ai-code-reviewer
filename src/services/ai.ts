@@ -87,6 +87,7 @@ Instructions:
 - For newly added imports or variables, flag them only if they are unused.
 - Always include a concrete code example when suggesting a fix.
 - Do not suggest adding inline comments to the code.
+- For each issue found, provide a concrete code suggestion with a complete fix when possible.
 
 Return your review only as a JSON array of objects with the following structure:
 {
@@ -95,11 +96,17 @@ Return your review only as a JSON array of objects with the following structure:
       "lineNumber": <line number as integer>,
       "reviewComment": "<your specific, actionable feedback for this line>",
       "severity": "<one of: error, warning, info>",
-      "filePath": "${filePath}"
+      "filePath": "${filePath}",
+      "suggestion": {
+        "code": "<suggested code that fixes the issue>",
+        "description": "<brief description of what the fix does>"
+      }
     },
     ...
   ]
-}`;
+}
+
+The "suggestion" field is optional but should be included whenever you can provide a specific fix.`;
 
 	// Build and return the complete prompt string using a template literal
 	return `Review the following code changes in ${language} file '${filePath}':
@@ -560,12 +567,33 @@ export function createComment(file: File, chunk: Chunk, aiResponse: AIReviewResp
 
 		// Format the comment body to properly handle code suggestions
 		let formattedComment = `**Note: This comment was originally for line ${lineNumber} but was adjusted to fit in the viewable diff.**\n\n${aiResponse.reviewComment}`;
+        
+		// Determine the appropriate emoji based on severity
+		let emoji = "💬";
+		if (aiResponse.severity === "error") {
+			emoji = "⛔";
+		} else if (aiResponse.severity === "warning") {
+			emoji = "⚠️";
+		} else if (aiResponse.severity === "info") {
+			emoji = "ℹ️";
+		}
+		
+		// Add severity prefix
+		formattedComment = `${emoji} **${aiResponse.severity.toUpperCase()}**\n\n${formattedComment}`;
+		
+		// Add suggestion if available
+		if (aiResponse.suggestion && aiResponse.suggestion.code) {
+			formattedComment += `\n\n**Suggested Fix**:\n${aiResponse.suggestion.description}\n\`\`\`suggestion\n${aiResponse.suggestion.code}\n\`\`\``;
+		}
 
-		// If the comment contains code suggestions, format them properly
+		// If the comment contains code blocks, format them properly
 		const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
 		if (codeBlockRegex.test(formattedComment)) {
-			// Replace code blocks with properly formatted ones
+			// Replace code blocks with properly formatted ones (except suggestion blocks)
 			formattedComment = formattedComment.replace(codeBlockRegex, (match, lang, code) => {
+				if (match.includes("```suggestion")) {
+					return match; // Leave suggestion blocks unchanged
+				}
 				// If no language is specified, try to detect it from the file extension
 				const language = lang || getLanguageFromPath(file.to || "").toLowerCase();
 				return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
@@ -581,14 +609,32 @@ export function createComment(file: File, chunk: Chunk, aiResponse: AIReviewResp
 		};
 	}
 
-	// Format the comment body to properly handle code suggestions
-	let formattedComment = aiResponse.reviewComment;
+	// Format the comment with emoji and severity
+	let emoji = "💬";
+	if (aiResponse.severity === "error") {
+		emoji = "⛔";
+	} else if (aiResponse.severity === "warning") {
+		emoji = "⚠️";
+	} else if (aiResponse.severity === "info") {
+		emoji = "ℹ️";
+	}
+	
+	// Format the comment body
+	let formattedComment = `${emoji} **${aiResponse.severity.toUpperCase()}**\n\n${aiResponse.reviewComment}`;
+	
+	// Add suggestion if available
+	if (aiResponse.suggestion && aiResponse.suggestion.code) {
+		formattedComment += `\n\n**Suggested Fix**:\n${aiResponse.suggestion.description}\n\`\`\`suggestion\n${aiResponse.suggestion.code}\n\`\`\``;
+	}
 
-	// If the comment contains code suggestions, format them properly
+	// If the comment contains code blocks, format them properly
 	const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
 	if (codeBlockRegex.test(formattedComment)) {
-		// Replace code blocks with properly formatted ones
+		// Replace code blocks with properly formatted ones (except suggestion blocks)
 		formattedComment = formattedComment.replace(codeBlockRegex, (match, lang, code) => {
+			if (match.includes("```suggestion")) {
+				return match; // Leave suggestion blocks unchanged
+			}
 			// If no language is specified, try to detect it from the file extension
 			const language = lang || getLanguageFromPath(file.to || "").toLowerCase();
 			return `\`\`\`${language}\n${code.trim()}\n\`\`\``;

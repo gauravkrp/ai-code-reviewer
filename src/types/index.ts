@@ -5,6 +5,10 @@ export interface AIReviewResponse {
 	reviewComment: string;
 	severity: "error" | "warning" | "info";
 	filePath: string;
+	suggestion?: {
+		code: string;      // The suggested code fix
+		description: string; // Description of the fix
+	};
 }
 
 export interface ReviewComment {

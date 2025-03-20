@@ -9,6 +9,8 @@ review process.
 - Reviews pull requests using OpenAI's GPT-4 or Anthropic's Claude models.
 - Provides intelligent comments and suggestions for improving your code.
 - Generates comprehensive review summaries for quick understanding of key issues.
+- Offers inline code suggestions using GitHub's suggestion syntax for easy fixes.
+- Includes automated fix recommendations for common coding issues.
 - Customizable review focus areas (code quality, security, performance, etc.).
 - Filters out files that match specified exclude patterns.
 - Supports both pull requests and direct code pushes to branches.
@@ -61,7 +63,9 @@ jobs:
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
           # Review customization
           ENABLE_SUMMARY: "true" # Optional: generate a summary of all review findings (default: true)
+          ENABLE_AUTO_FIX: "true" # Optional: generate automated fixes for common issues (default: true)
           REVIEW_FOCUS: "security,performance,bugs" # Optional: customize review focus areas
+          SUGGESTION_STRATEGY: "auto-fix-first" # Optional: controls the suggestion strategy (default: auto-fix-first)
           # Cache configuration (all optional)
           CACHE_ENABLED: "true"  # Enable caching (default)
           CACHE_KEY_PREFIX: "acr-"  # Custom prefix for cache keys
@@ -108,7 +112,9 @@ jobs:
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
           # Review customization
           ENABLE_SUMMARY: "true" # Optional: generate a summary of all review findings
+          ENABLE_AUTO_FIX: "true" # Optional: generate automated fixes for common issues
           REVIEW_FOCUS: "security,performance,maintainability" # Optional: customize review focus areas
+          SUGGESTION_STRATEGY: "auto-fix-first" # Optional: controls the suggestion strategy
           # Cache configuration
           CACHE_ENABLED: "true"
           CACHE_TTL_DAYS: "14"  # Keep cache for 2 weeks
@@ -148,7 +154,9 @@ jobs:
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
           # Review customization using repository variables
           ENABLE_SUMMARY: ${{ vars.ENABLE_SUMMARY || 'true' }}
+          ENABLE_AUTO_FIX: ${{ vars.ENABLE_AUTO_FIX || 'true' }}
           REVIEW_FOCUS: ${{ vars.REVIEW_FOCUS || 'code_quality,bugs,security,performance,maintainability' }}
+          SUGGESTION_STRATEGY: ${{ vars.SUGGESTION_STRATEGY || 'auto-fix-first' }}
           # Cache configuration using repository variables
           CACHE_ENABLED: ${{ vars.CACHE_ENABLED || 'true' }}
           CACHE_KEY_PREFIX: ${{ vars.CACHE_KEY_PREFIX || 'acr-' }}
@@ -197,6 +205,42 @@ You can customize how the AI reviewer focuses on your code:
    When enabled (default), the AI will provide a comprehensive summary at the beginning of the review, highlighting key issues and patterns found across files.
 
 3. **Branch Staleness Detection**: The action includes utilities to detect stale branches based on the last commit date, helping maintain repository hygiene.
+
+### Code Suggestions and Automated Fixes
+
+The AI Code Reviewer now provides direct code suggestions rather than just comments:
+
+1. **Inline Code Suggestions**: 
+   - Automatically formats suggestions using GitHub's suggestion blocks
+   - Allows users to apply fixes with a single click
+   - Provides clear descriptions of what each fix does
+
+2. **Automated Fix Detection**:
+   - Automatically detects and suggests fixes for common issues
+   - Provides pattern-matching for typical problems like:
+     - Unused variables
+     - Missing null checks
+     - Debugging statements left in code
+     - Promise chains that could use async/await
+     - Missing type annotations
+   - Can be enabled/disabled with the `ENABLE_AUTO_FIX` configuration option
+
+These suggestions appear directly in the review comments with a "Suggested Fix" section that users can apply with a single click, making it much easier to implement the AI's recommendations.
+
+To control the suggestion behavior, use the `SUGGESTION_STRATEGY` option:
+
+```yaml
+# Choose one of these strategies:
+SUGGESTION_STRATEGY: "auto-fix-first" # Try automated fixes first, fallback to AI suggestions (default)
+SUGGESTION_STRATEGY: "ai-first"       # Use AI suggestions if available, fallback to automated fixes 
+SUGGESTION_STRATEGY: "ai-only"        # Only use AI-generated suggestions, never automated fixes
+```
+
+This allows you to prioritize the more reliable auto-fixes for common patterns, or prefer the AI's custom suggestions when they're available.
+
+```yaml
+ENABLE_AUTO_FIX: "true"  # or "false" to disable
+```
 
 ### Support for Code Pushes
 
