@@ -499,4 +499,4 @@ export function createComment(file: File, chunk: Chunk, aiResponse: AIReviewResp
     body: formattedComment,
     side: 'RIGHT' as const // We always comment on the new version
   };
-} 
+}

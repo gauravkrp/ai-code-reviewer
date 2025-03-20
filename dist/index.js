@@ -154,6 +154,7 @@ const config_1 = __nccwpck_require__(6730);
 const utils_1 = __nccwpck_require__(1606);
 const github_1 = __nccwpck_require__(9481);
 const ai_1 = __nccwpck_require__(9161);
+const fs_1 = __nccwpck_require__(7147);
 // Constants for configuration
 const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
 /**
@@ -480,15 +481,43 @@ function main() {
             // Validate configuration
             validateConfig();
             // Get PR details
-            core.info("Fetching PR details...");
+            core.info("Fetching event details...");
             const prDetails = yield (0, github_1.getPRDetails)();
-            core.info(`Processing PR #${prDetails.pull_number} in ${prDetails.owner}/${prDetails.repo}`);
-            core.info(`PR Title: ${prDetails.title}`);
-            if (prDetails.description) {
-                core.info(`PR Description: ${prDetails.description.slice(0, 100)}${prDetails.description.length > 100 ? '...' : ''}`);
+            if (prDetails.eventType === 'pull_request') {
+                core.info(`Processing PR #${prDetails.pull_number} in ${prDetails.owner}/${prDetails.repo}`);
+                core.info(`PR Title: ${prDetails.title}`);
+                if (prDetails.description) {
+                    core.info(`PR Description: ${prDetails.description.slice(0, 100)}${prDetails.description.length > 100 ? '...' : ''}`);
+                }
+            }
+            else if (prDetails.eventType === 'push') {
+                core.info(`Processing push to branch "${prDetails.ref}" in ${prDetails.owner}/${prDetails.repo}`);
+                // If the title and description weren't populated yet, get them from the commit data
+                if (prDetails.title === "Push event") {
+                    // Get the event data to extract commit information
+                    const eventPath = process.env.GITHUB_EVENT_PATH;
+                    if (eventPath) {
+                        const eventData = JSON.parse((0, fs_1.readFileSync)(eventPath, "utf8"));
+                        const commits = eventData.commits || [];
+                        core.info(`Commits: ${commits.length}`);
+                        // Use the commit messages for context
+                        if (commits.length > 0) {
+                            const latestCommit = commits[0];
+                            prDetails.title = latestCommit.message || 'Push event';
+                            // Create a description from commit messages
+                            prDetails.description = commits.map((commit, idx) => `${idx + 1}. ${commit.message || 'No message'} (${commit.id.substring(0, 7)})`).join('\n');
+                            core.info(`Latest commit: ${latestCommit.message || 'No message'}`);
+                            core.debug(`Using commit messages as context: ${prDetails.description}`);
+                        }
+                    }
+                }
+            }
+            else {
+                core.info(`Processing ${prDetails.eventType || 'unknown'} event for ${prDetails.owner}/${prDetails.repo}`);
+                core.info(`Event Title: ${prDetails.title}`);
             }
             // Get diff
-            core.info("Fetching PR diff...");
+            core.info("Fetching diff...");
             const diff = yield (0, github_1.getDiff)(prDetails.owner, prDetails.repo, prDetails.pull_number);
             if (!diff) {
                 core.info("No diff found or unsupported event");
@@ -517,34 +546,49 @@ function main() {
             // Analyze code and create comments
             core.info("\n=== Starting code analysis ===");
             const comments = yield analyzeCode(filteredDiff, prDetails);
-            // Create review if there are comments
+            // Create review with comments
             if (comments.length > 0) {
-                // Group comments by file for better overview
-                const commentsByFile = new Map();
-                comments.forEach(comment => {
-                    const file = comment.path;
-                    if (!commentsByFile.has(file)) {
-                        commentsByFile.set(file, []);
-                    }
-                    commentsByFile.get(file).push(comment);
-                });
                 core.info(`\n=== Creating review with ${comments.length} comments ===`);
+                // Log comments by file
+                const commentsByFile = new Map();
+                for (const comment of comments) {
+                    const count = commentsByFile.get(comment.path) || 0;
+                    commentsByFile.set(comment.path, count + 1);
+                }
                 core.info("Comments by file:");
-                commentsByFile.forEach((fileComments, path) => {
-                    core.info(`- ${path}: ${fileComments.length} comment(s)`);
-                });
-                comments.forEach(comment => {
-                    const previewLength = 60;
-                    const preview = comment.body.length > previewLength ?
-                        `${comment.body.slice(0, previewLength)}...` : comment.body;
-                    core.debug(`- ${comment.path}:${comment.line} - ${preview}`);
-                });
-                core.info("\nSubmitting review to GitHub...");
-                yield (0, github_1.createReviewComment)(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
-                core.info("Review successfully submitted to GitHub");
+                for (const [file, count] of commentsByFile.entries()) {
+                    core.info(`- ${file}: ${count} comment(s)`);
+                }
+                // For push events, we can't create PR reviews, so we'll just log the comments
+                if (prDetails.eventType === 'push') {
+                    core.info(`\nThis is a push event, so we'll log comments instead of creating a GitHub review`);
+                    // Log the comments in a readable format
+                    for (const comment of comments) {
+                        core.info(`\n${comment.path}:${comment.line} - ${comment.body.split('\n')[0]}...`);
+                    }
+                    const duration = (Date.now() - startTime) / 1000;
+                    core.info(`\n=== AI code review completed successfully in ${duration.toFixed(2)} seconds ===`);
+                    core.info(`Found ${comments.length} issues in ${filteredDiff.length} files`);
+                    return;
+                }
+                // For PR events, create the review in GitHub
+                try {
+                    core.info("Submitting review to GitHub...");
+                    yield (0, github_1.createReviewComment)(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+                    core.info("Review successfully submitted to GitHub");
+                }
+                catch (error) {
+                    // If creating the review fails, log the error but don't fail the action
+                    core.error(`Failed to create review: ${error instanceof Error ? error.message : String(error)}`);
+                    // Log the comments so they're not lost
+                    core.info("\nHere are the comments that couldn't be submitted:");
+                    for (const comment of comments) {
+                        core.info(`\n${comment.path}:${comment.line} - ${comment.body.split('\n')[0]}...`);
+                    }
+                }
             }
             else {
-                core.info("\nNo comments to add. All code looks good!");
+                core.info("No review comments to create");
             }
             const duration = (Date.now() - startTime) / 1000;
             core.info(`\n=== AI code review completed successfully in ${duration.toFixed(2)} seconds ===`);
@@ -1122,29 +1166,80 @@ const octokit = new rest_1.Octokit({ auth: config_1.GITHUB_TOKEN });
  * Fetches pull request details from GitHub
  */
 function getPRDetails() {
-    var _a, _b;
+    var _a, _b, _c, _d;
     return __awaiter(this, void 0, void 0, function* () {
         try {
             if (!process.env.GITHUB_EVENT_PATH) {
                 throw new Error("GITHUB_EVENT_PATH environment variable is not set");
             }
             const eventData = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH, "utf8"));
-            const { repository, number } = eventData;
-            if (!repository || !number) {
-                throw new Error("Invalid event data: missing repository or PR number");
+            // Handle different event types
+            if (eventData.pull_request) {
+                // Pull request event
+                const { repository, number } = eventData;
+                if (!repository || !number) {
+                    throw new Error("Invalid event data: missing repository or PR number");
+                }
+                const prResponse = yield (0, retry_1.withRetry)(() => octokit.pulls.get({
+                    owner: repository.owner.login,
+                    repo: repository.name,
+                    pull_number: number,
+                }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-pr");
+                return {
+                    owner: repository.owner.login,
+                    repo: repository.name,
+                    pull_number: number,
+                    title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
+                    description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
+                    eventType: 'pull_request'
+                };
             }
-            const prResponse = yield (0, retry_1.withRetry)(() => octokit.pulls.get({
-                owner: repository.owner.login,
-                repo: repository.name,
-                pull_number: number,
-            }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-pr");
-            return {
-                owner: repository.owner.login,
-                repo: repository.name,
-                pull_number: number,
-                title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
-                description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
-            };
+            else if (eventData.commits && eventData.commits.length > 0) {
+                // Push event
+                const { repository, ref, after } = eventData;
+                if (!repository) {
+                    throw new Error("Invalid event data: missing repository information");
+                }
+                // For push events, we don't have a pull number, so we'll use 0 as a placeholder
+                return {
+                    owner: repository.owner.login || repository.owner.name,
+                    repo: repository.name,
+                    pull_number: 0,
+                    title: "Push event",
+                    description: "",
+                    ref: ref === null || ref === void 0 ? void 0 : ref.replace('refs/heads/', ''),
+                    commit: after,
+                    eventType: 'push'
+                };
+            }
+            else {
+                // Handle other event types gracefully
+                let owner = '';
+                let repo = '';
+                // Try to extract repository info from various places in the event data
+                if (eventData.repository) {
+                    owner = ((_c = eventData.repository.owner) === null || _c === void 0 ? void 0 : _c.login) || ((_d = eventData.repository.owner) === null || _d === void 0 ? void 0 : _d.name) || '';
+                    repo = eventData.repository.name || '';
+                }
+                // Fallback to environment variables if necessary
+                if (!owner || !repo) {
+                    const githubRepository = process.env.GITHUB_REPOSITORY || '';
+                    const [repoOwner, repoName] = githubRepository.split('/');
+                    owner = owner || repoOwner;
+                    repo = repo || repoName;
+                }
+                if (!owner || !repo) {
+                    throw new Error("Could not determine repository owner and name from event data");
+                }
+                return {
+                    owner,
+                    repo,
+                    pull_number: 0,
+                    title: "GitHub event",
+                    description: `Event type: ${eventData.action || 'unknown'}`,
+                    eventType: 'other'
+                };
+            }
         }
         catch (error) {
             core.error(`Failed to get PR details: ${error instanceof Error ? error.message : String(error)}`);
@@ -1164,7 +1259,8 @@ function getDiff(owner, repo, pull_number) {
             }
             const eventData = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH, "utf8"));
             // Log the event type for debugging
-            core.debug(`Processing GitHub event type: ${eventData.action || 'unknown'}`);
+            const eventType = eventData.action || (eventData.commits ? 'push' : 'unknown');
+            core.debug(`Processing GitHub event type: ${eventType}`);
             // If this is a pull request event, get the diff from the event payload
             if (eventData.pull_request) {
                 core.info("Processing pull request event - getting full PR diff");
@@ -1177,19 +1273,90 @@ function getDiff(owner, repo, pull_number) {
                 // @ts-expect-error - response.data is a string when mediaType.format is "diff"
                 return response.data;
             }
-            // For other events (like push), get the diff between the current and previous commit
+            // For push events, get only the diff of the pushed commits
             if (eventData.commits && eventData.commits.length > 0) {
-                core.info("Processing push event - getting diff between commits");
+                core.info("Processing push event - getting diff of pushed commits only");
+                // For push events, we should only analyze the pushed commits, not the entire PR
                 const currentCommit = eventData.after;
-                const previousCommit = eventData.before;
-                if (!currentCommit || !previousCommit) {
+                const baseCommit = eventData.before;
+                if (!currentCommit) {
                     throw new Error("Missing commit information in event payload");
                 }
-                core.debug(`Comparing commits: ${previousCommit} -> ${currentCommit}`);
+                // If it's the first commit in a repo, use a different approach
+                if (baseCommit === '0000000000000000000000000000000000000000') {
+                    core.debug(`First commit detected: ${currentCommit}`);
+                    // Get the commit details to get its files
+                    const response = yield (0, retry_1.withRetry)(() => octokit.repos.getCommit({
+                        owner,
+                        repo,
+                        ref: currentCommit
+                    }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-commit");
+                    // Construct a proper diff for each file in the commit
+                    let manualDiff = "";
+                    for (const file of response.data.files || []) {
+                        manualDiff += `diff --git a/${file.filename} b/${file.filename}\n`;
+                        if (file.status === 'added') {
+                            manualDiff += `new file mode 100644\n`;
+                            manualDiff += `index 0000000..${file.sha.substring(0, 7)}\n`;
+                            manualDiff += `--- /dev/null\n`;
+                            manualDiff += `+++ b/${file.filename}\n`;
+                            // Get the actual content of the file
+                            try {
+                                const contentResponse = yield (0, retry_1.withRetry)(() => octokit.repos.getContent({
+                                    owner,
+                                    repo,
+                                    path: file.filename,
+                                    ref: currentCommit
+                                }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-get-content");
+                                if ('content' in contentResponse.data && contentResponse.data.content) {
+                                    const content = Buffer.from(contentResponse.data.content, 'base64').toString('utf8');
+                                    const lines = content.split('\n');
+                                    manualDiff += `@@ -0,0 +1,${lines.length} @@\n`;
+                                    lines.forEach(line => {
+                                        manualDiff += `+${line}\n`;
+                                    });
+                                }
+                                else {
+                                    // Fallback if we can't get content
+                                    manualDiff += `@@ -0,0 +1,${file.additions} @@\n`;
+                                    manualDiff += `+// Added ${file.additions} lines (content not available)\n`;
+                                }
+                            }
+                            catch (contentError) {
+                                core.warning(`Failed to get content for ${file.filename}: ${contentError instanceof Error ? contentError.message : String(contentError)}`);
+                                manualDiff += `@@ -0,0 +1,${file.additions} @@\n`;
+                                manualDiff += `+// Added ${file.additions} lines (content not available)\n`;
+                            }
+                        }
+                        else if (file.status === 'modified') {
+                            manualDiff += `index ${file.sha.substring(0, 7)}..${file.sha.substring(0, 7)} 100644\n`;
+                            manualDiff += `--- a/${file.filename}\n`;
+                            manualDiff += `+++ b/${file.filename}\n`;
+                            manualDiff += `@@ -1,${file.changes - file.additions} +1,${file.changes - file.deletions} @@\n`;
+                            // For modified files, we'd need the patch info
+                            if (file.patch) {
+                                manualDiff += file.patch;
+                            }
+                            else {
+                                manualDiff += `// Modified file with ${file.additions} additions and ${file.deletions} deletions\n`;
+                            }
+                        }
+                        else if (file.status === 'removed') {
+                            manualDiff += `deleted file mode 100644\n`;
+                            manualDiff += `index ${file.sha.substring(0, 7)}..0000000\n`;
+                            manualDiff += `--- a/${file.filename}\n`;
+                            manualDiff += `+++ /dev/null\n`;
+                            manualDiff += `@@ -1,${file.deletions} +0,0 @@\n`;
+                            manualDiff += `// Removed ${file.deletions} lines\n`;
+                        }
+                    }
+                    return manualDiff;
+                }
+                core.debug(`Comparing pushed commits: ${baseCommit} -> ${currentCommit}`);
                 const response = yield (0, retry_1.withRetry)(() => octokit.repos.compareCommits({
                     owner,
                     repo,
-                    base: previousCommit,
+                    base: baseCommit,
                     head: currentCommit,
                     mediaType: { format: "diff" },
                 }), config_1.MAX_RETRIES, config_1.RETRY_DELAY, "github-api-compare-commits");

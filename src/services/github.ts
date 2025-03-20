@@ -22,30 +22,85 @@ export async function getPRDetails(): Promise<PRDetails> {
       readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")
     );
     
-    const { repository, number } = eventData;
-    
-    if (!repository || !number) {
-      throw new Error("Invalid event data: missing repository or PR number");
-    }
+    // Handle different event types
+    if (eventData.pull_request) {
+      // Pull request event
+      const { repository, number } = eventData;
+      
+      if (!repository || !number) {
+        throw new Error("Invalid event data: missing repository or PR number");
+      }
 
-    const prResponse = await withRetry(
-      () => octokit.pulls.get({
+      const prResponse = await withRetry(
+        () => octokit.pulls.get({
+          owner: repository.owner.login,
+          repo: repository.name,
+          pull_number: number,
+        }),
+        MAX_RETRIES,
+        RETRY_DELAY,
+        "github-api-get-pr"
+      );
+
+      return {
         owner: repository.owner.login,
         repo: repository.name,
         pull_number: number,
-      }),
-      MAX_RETRIES,
-      RETRY_DELAY,
-      "github-api-get-pr"
-    );
-
-    return {
-      owner: repository.owner.login,
-      repo: repository.name,
-      pull_number: number,
-      title: prResponse.data.title ?? "",
-      description: prResponse.data.body ?? "",
-    };
+        title: prResponse.data.title ?? "",
+        description: prResponse.data.body ?? "",
+        eventType: 'pull_request'
+      };
+    } else if (eventData.commits && eventData.commits.length > 0) {
+      // Push event
+      const { repository, ref, after } = eventData;
+      
+      if (!repository) {
+        throw new Error("Invalid event data: missing repository information");
+      }
+      
+      // For push events, we don't have a pull number, so we'll use 0 as a placeholder
+      return {
+        owner: repository.owner.login || repository.owner.name,
+        repo: repository.name,
+        pull_number: 0, // Placeholder for push events
+        title: "Push event", // Will be replaced with commit message in main.ts
+        description: "", // Will be populated with commit messages in main.ts
+        ref: ref?.replace('refs/heads/', ''), // Branch name
+        commit: after, // The current commit SHA
+        eventType: 'push'
+      };
+    } else {
+      // Handle other event types gracefully
+      let owner = '';
+      let repo = '';
+      
+      // Try to extract repository info from various places in the event data
+      if (eventData.repository) {
+        owner = eventData.repository.owner?.login || eventData.repository.owner?.name || '';
+        repo = eventData.repository.name || '';
+      }
+      
+      // Fallback to environment variables if necessary
+      if (!owner || !repo) {
+        const githubRepository = process.env.GITHUB_REPOSITORY || '';
+        const [repoOwner, repoName] = githubRepository.split('/');
+        owner = owner || repoOwner;
+        repo = repo || repoName;
+      }
+      
+      if (!owner || !repo) {
+        throw new Error("Could not determine repository owner and name from event data");
+      }
+      
+      return {
+        owner,
+        repo,
+        pull_number: 0,
+        title: "GitHub event",
+        description: `Event type: ${eventData.action || 'unknown'}`,
+        eventType: 'other'
+      };
+    }
   } catch (error) {
     core.error(`Failed to get PR details: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
@@ -70,7 +125,8 @@ export async function getDiff(
     );
 
     // Log the event type for debugging
-    core.debug(`Processing GitHub event type: ${eventData.action || 'unknown'}`);
+    const eventType = eventData.action || (eventData.commits ? 'push' : 'unknown');
+    core.debug(`Processing GitHub event type: ${eventType}`);
 
     // If this is a pull request event, get the diff from the event payload
     if (eventData.pull_request) {
@@ -91,22 +147,107 @@ export async function getDiff(
       return response.data;
     }
 
-    // For other events (like push), get the diff between the current and previous commit
+    // For push events, get only the diff of the pushed commits
     if (eventData.commits && eventData.commits.length > 0) {
-      core.info("Processing push event - getting diff between commits");
-      const currentCommit = eventData.after;
-      const previousCommit = eventData.before;
+      core.info("Processing push event - getting diff of pushed commits only");
       
-      if (!currentCommit || !previousCommit) {
+      // For push events, we should only analyze the pushed commits, not the entire PR
+      const currentCommit = eventData.after;
+      const baseCommit = eventData.before;
+      
+      if (!currentCommit) {
         throw new Error("Missing commit information in event payload");
       }
 
-      core.debug(`Comparing commits: ${previousCommit} -> ${currentCommit}`);
+      // If it's the first commit in a repo, use a different approach
+      if (baseCommit === '0000000000000000000000000000000000000000') {
+        core.debug(`First commit detected: ${currentCommit}`);
+        // Get the commit details to get its files
+        const response = await withRetry(
+          () => octokit.repos.getCommit({
+            owner,
+            repo,
+            ref: currentCommit
+          }),
+          MAX_RETRIES,
+          RETRY_DELAY,
+          "github-api-get-commit"
+        );
+        
+        // Construct a proper diff for each file in the commit
+        let manualDiff = "";
+        for (const file of response.data.files || []) {
+          manualDiff += `diff --git a/${file.filename} b/${file.filename}\n`;
+          
+          if (file.status === 'added') {
+            manualDiff += `new file mode 100644\n`;
+            manualDiff += `index 0000000..${file.sha.substring(0, 7)}\n`;
+            manualDiff += `--- /dev/null\n`;
+            manualDiff += `+++ b/${file.filename}\n`;
+            
+            // Get the actual content of the file
+            try {
+              const contentResponse = await withRetry(
+                () => octokit.repos.getContent({
+                  owner,
+                  repo,
+                  path: file.filename,
+                  ref: currentCommit
+                }),
+                MAX_RETRIES,
+                RETRY_DELAY,
+                "github-api-get-content"
+              );
+              
+              if ('content' in contentResponse.data && contentResponse.data.content) {
+                const content = Buffer.from(contentResponse.data.content, 'base64').toString('utf8');
+                const lines = content.split('\n');
+                
+                manualDiff += `@@ -0,0 +1,${lines.length} @@\n`;
+                lines.forEach(line => {
+                  manualDiff += `+${line}\n`;
+                });
+              } else {
+                // Fallback if we can't get content
+                manualDiff += `@@ -0,0 +1,${file.additions} @@\n`;
+                manualDiff += `+// Added ${file.additions} lines (content not available)\n`;
+              }
+            } catch (contentError) {
+              core.warning(`Failed to get content for ${file.filename}: ${contentError instanceof Error ? contentError.message : String(contentError)}`);
+              manualDiff += `@@ -0,0 +1,${file.additions} @@\n`;
+              manualDiff += `+// Added ${file.additions} lines (content not available)\n`;
+            }
+          } else if (file.status === 'modified') {
+            manualDiff += `index ${file.sha.substring(0, 7)}..${file.sha.substring(0, 7)} 100644\n`;
+            manualDiff += `--- a/${file.filename}\n`;
+            manualDiff += `+++ b/${file.filename}\n`;
+            manualDiff += `@@ -1,${file.changes - file.additions} +1,${file.changes - file.deletions} @@\n`;
+            
+            // For modified files, we'd need the patch info
+            if (file.patch) {
+              manualDiff += file.patch;
+            } else {
+              manualDiff += `// Modified file with ${file.additions} additions and ${file.deletions} deletions\n`;
+            }
+          } else if (file.status === 'removed') {
+            manualDiff += `deleted file mode 100644\n`;
+            manualDiff += `index ${file.sha.substring(0, 7)}..0000000\n`;
+            manualDiff += `--- a/${file.filename}\n`;
+            manualDiff += `+++ /dev/null\n`;
+            manualDiff += `@@ -1,${file.deletions} +0,0 @@\n`;
+            manualDiff += `// Removed ${file.deletions} lines\n`;
+          }
+        }
+        
+        return manualDiff;
+      }
+
+      core.debug(`Comparing pushed commits: ${baseCommit} -> ${currentCommit}`);
       const response = await withRetry(
         () => octokit.repos.compareCommits({
           owner,
           repo,
-          base: previousCommit,
+          base: baseCommit,
           head: currentCommit,
           mediaType: { format: "diff" },
         }),

@@ -6,8 +6,9 @@ dotenv.config();
 process.env.GITHUB_EVENT_PATH = './__tests/fixtures/pull_request.json';
 process.env.INPUT_GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 process.env.INPUT_OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-process.env.INPUT_AI_PROVIDER = 'openai';
-process.env.INPUT_OPENAI_API_MODEL = 'o3-mini';
+process.env.INPUT_AI_PROVIDER = 'anthropic';
+process.env.INPUT_ANTHROPIC_API_MODEL = 'claude-3-7-sonnet-20250219';
+process.env.INPUT_ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // Exclude lock files and limit files for testing
 process.env.INPUT_EXCLUDE = '**/*lock.json,**/yarn.lock,**/package-lock.json';
 process.env.INPUT_MAX_FILES = '10';  // Limit to first 5 files for testing

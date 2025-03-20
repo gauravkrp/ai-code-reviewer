@@ -16,6 +16,7 @@ import {
 import { isFileTooLarge, isChunkTooLarge } from "./utils";
 import { getPRDetails, getDiff, createReviewComment } from "./services/github";
 import { getAIResponse, createComment, createPrompt } from "./services/ai";
+import { readFileSync } from "fs";
 
 // Constants for configuration
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
@@ -402,16 +403,50 @@ export async function main() {
     validateConfig();
     
     // Get PR details
-    core.info("Fetching PR details...");
+    core.info("Fetching event details...");
     const prDetails = await getPRDetails();
-    core.info(`Processing PR #${prDetails.pull_number} in ${prDetails.owner}/${prDetails.repo}`);
-    core.info(`PR Title: ${prDetails.title}`);
-    if (prDetails.description) {
-      core.info(`PR Description: ${prDetails.description.slice(0, 100)}${prDetails.description.length > 100 ? '...' : ''}`);
+    
+    if (prDetails.eventType === 'pull_request') {
+      core.info(`Processing PR #${prDetails.pull_number} in ${prDetails.owner}/${prDetails.repo}`);
+      core.info(`PR Title: ${prDetails.title}`);
+      if (prDetails.description) {
+        core.info(`PR Description: ${prDetails.description.slice(0, 100)}${prDetails.description.length > 100 ? '...' : ''}`);
+      }
+    } else if (prDetails.eventType === 'push') {
+      core.info(`Processing push to branch "${prDetails.ref}" in ${prDetails.owner}/${prDetails.repo}`);
+      
+      // If the title and description weren't populated yet, get them from the commit data
+      if (prDetails.title === "Push event") {
+        // Get the event data to extract commit information
+        const eventPath = process.env.GITHUB_EVENT_PATH;
+        if (eventPath) {
+          const eventData = JSON.parse(readFileSync(eventPath, "utf8"));
+          const commits = eventData.commits || [];
+          
+          core.info(`Commits: ${commits.length}`);
+          
+          // Use the commit messages for context
+          if (commits.length > 0) {
+            const latestCommit = commits[0];
+            prDetails.title = latestCommit.message || 'Push event';
+            
+            // Create a description from commit messages
+            prDetails.description = commits.map((commit: any, idx: number) => 
+              `${idx+1}. ${commit.message || 'No message'} (${commit.id.substring(0, 7)})`
+            ).join('\n');
+            
+            core.info(`Latest commit: ${latestCommit.message || 'No message'}`);
+            core.debug(`Using commit messages as context: ${prDetails.description}`);
+          }
+        }
+      }
+    } else {
+      core.info(`Processing ${prDetails.eventType || 'unknown'} event for ${prDetails.owner}/${prDetails.repo}`);
+      core.info(`Event Title: ${prDetails.title}`);
     }
     
     // Get diff
-    core.info("Fetching PR diff...");
+    core.info("Fetching diff...");
     const diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
     
     if (!diff) {
@@ -447,41 +482,55 @@ export async function main() {
     core.info("\n=== Starting code analysis ===");
     const comments = await analyzeCode(filteredDiff, prDetails);
     
-    // Create review if there are comments
+    // Create review with comments
     if (comments.length > 0) {
-      // Group comments by file for better overview
-      const commentsByFile = new Map<string, ReviewComment[]>();
-      comments.forEach(comment => {
-        const file = comment.path;
-        if (!commentsByFile.has(file)) {
-          commentsByFile.set(file, []);
-        }
-        commentsByFile.get(file)!.push(comment);
-      });
-      
       core.info(`\n=== Creating review with ${comments.length} comments ===`);
+      
+      // Log comments by file
+      const commentsByFile = new Map<string, number>();
+      for (const comment of comments) {
+        const count = commentsByFile.get(comment.path) || 0;
+        commentsByFile.set(comment.path, count + 1);
+      }
+      
       core.info("Comments by file:");
-      commentsByFile.forEach((fileComments, path) => {
-        core.info(`- ${path}: ${fileComments.length} comment(s)`);
-      });
+      for (const [file, count] of commentsByFile.entries()) {
+        core.info(`- ${file}: ${count} comment(s)`);
+      }
       
-      comments.forEach(comment => {
-        const previewLength = 60;
-        const preview = comment.body.length > previewLength ? 
-          `${comment.body.slice(0, previewLength)}...` : comment.body;
-        core.debug(`- ${comment.path}:${comment.line} - ${preview}`);
-      });
+      // For push events, we can't create PR reviews, so we'll just log the comments
+      if (prDetails.eventType === 'push') {
+        core.info(`\nThis is a push event, so we'll log comments instead of creating a GitHub review`);
+        
+        // Log the comments in a readable format
+        for (const comment of comments) {
+          core.info(`\n${comment.path}:${comment.line} - ${comment.body.split('\n')[0]}...`);
+        }
+        
+        const duration = (Date.now() - startTime) / 1000;
+        core.info(`\n=== AI code review completed successfully in ${duration.toFixed(2)} seconds ===`);
+        core.info(`Found ${comments.length} issues in ${filteredDiff.length} files`);
+        
+        return;
+      }
       
-      core.info("\nSubmitting review to GitHub...");
-      await createReviewComment(
-        prDetails.owner,
-        prDetails.repo,
-        prDetails.pull_number,
-        comments
-      );
-      core.info("Review successfully submitted to GitHub");
+      // For PR events, create the review in GitHub
+      try {
+        core.info("Submitting review to GitHub...");
+        await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+        core.info("Review successfully submitted to GitHub");
+      } catch (error) {
+        // If creating the review fails, log the error but don't fail the action
+        core.error(`Failed to create review: ${error instanceof Error ? error.message : String(error)}`);
+        
+        // Log the comments so they're not lost
+        core.info("\nHere are the comments that couldn't be submitted:");
+        for (const comment of comments) {
+          core.info(`\n${comment.path}:${comment.line} - ${comment.body.split('\n')[0]}...`);
+        }
+      }
     } else {
-      core.info("\nNo comments to add. All code looks good!");
+      core.info("No review comments to create");
     }
     
     const duration = (Date.now() - startTime) / 1000;

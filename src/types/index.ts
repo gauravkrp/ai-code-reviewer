@@ -20,6 +20,9 @@ export interface PRDetails {
   pull_number: number;
   title: string;
   description: string;
+  ref?: string;     // Branch name for push events
+  commit?: string;  // Commit SHA for push events
+  eventType?: 'pull_request' | 'push' | 'other'; // Type of event
 }
 
 export type AIResponseArray = AIReviewResponse[];
