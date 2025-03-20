@@ -8,9 +8,12 @@ review process.
 
 - Reviews pull requests using OpenAI's GPT-4 or Anthropic's Claude models.
 - Provides intelligent comments and suggestions for improving your code.
+- Generates comprehensive review summaries for quick understanding of key issues.
+- Customizable review focus areas (code quality, security, performance, etc.).
 - Filters out files that match specified exclude patterns.
 - Supports both pull requests and direct code pushes to branches.
 - Avoids duplicate comments by tracking existing issues and resolved items.
+- Detects stale branches to help maintain repository health.
 - Uses GitHub Actions cache to improve performance and reduce API costs.
 - Easy to set up and integrate into your GitHub workflow.
 
@@ -56,6 +59,9 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_MODEL: "gpt-4-1106-preview" # Optional: defaults to "gpt-4"
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
+          # Review customization
+          ENABLE_SUMMARY: "true" # Optional: generate a summary of all review findings (default: true)
+          REVIEW_FOCUS: "security,performance,bugs" # Optional: customize review focus areas
           # Cache configuration (all optional)
           CACHE_ENABLED: "true"  # Enable caching (default)
           CACHE_KEY_PREFIX: "acr-"  # Custom prefix for cache keys
@@ -100,6 +106,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_API_MODEL: "claude-3-7-sonnet-20250219" # Optional: defaults to "claude-3-7-sonnet-20250219"
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
+          # Review customization
+          ENABLE_SUMMARY: "true" # Optional: generate a summary of all review findings
+          REVIEW_FOCUS: "security,performance,maintainability" # Optional: customize review focus areas
           # Cache configuration
           CACHE_ENABLED: "true"
           CACHE_TTL_DAYS: "14"  # Keep cache for 2 weeks
@@ -137,6 +146,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_API_MODEL: ${{ vars.ANTHROPIC_API_MODEL || 'claude-3-7-sonnet-20250219' }}
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
+          # Review customization using repository variables
+          ENABLE_SUMMARY: ${{ vars.ENABLE_SUMMARY || 'true' }}
+          REVIEW_FOCUS: ${{ vars.REVIEW_FOCUS || 'code_quality,bugs,security,performance,maintainability' }}
           # Cache configuration using repository variables
           CACHE_ENABLED: ${{ vars.CACHE_ENABLED || 'true' }}
           CACHE_KEY_PREFIX: ${{ vars.CACHE_KEY_PREFIX || 'acr-' }}
@@ -151,6 +163,40 @@ jobs:
 
 The AI Code Reviewer GitHub Action retrieves the pull request diff, filters out excluded files, and sends code chunks to
 the selected AI provider (OpenAI or Anthropic). It then generates review comments based on the AI's response and adds them to the pull request.
+
+### Review Customization
+
+You can customize how the AI reviewer focuses on your code:
+
+1. **Review Focus Areas**: Control which aspects of code quality the AI should prioritize:
+   ```yaml
+   REVIEW_FOCUS: "security,performance,bugs,maintainability,testability"
+   ```
+   Available focus areas include:
+   - `code_quality`: General code quality and best practices
+   - `bugs`: Logical errors and potential bugs
+   - `security`: Security vulnerabilities
+   - `performance`: Performance issues and optimizations
+   - `maintainability`: Code readability and maintainability
+   - `testability`: Test coverage and testability concerns
+   - `documentation`: Missing or incorrect documentation
+   - `accessibility`: Accessibility issues
+   - `compatibility`: Browser or device compatibility issues
+   - `dependencies`: Outdated or unnecessary dependencies
+   - `duplication`: Code duplication or redundancy
+   - `naming`: Naming conventions and clarity
+   - `architecture`: Architectural design issues
+   - `standards`: Compliance with standards and conventions
+
+   If not specified, a balanced default selection is used.
+
+2. **Review Summary**: Enable or disable AI-generated summaries of all review comments:
+   ```yaml
+   ENABLE_SUMMARY: "true"  # or "false" to disable
+   ```
+   When enabled (default), the AI will provide a comprehensive summary at the beginning of the review, highlighting key issues and patterns found across files.
+
+3. **Branch Staleness Detection**: The action includes utilities to detect stale branches based on the last commit date, helping maintain repository hygiene.
 
 ### Support for Code Pushes
 

@@ -16,6 +16,29 @@ export const EXCLUDE_PATTERNS: string[] = core
   .map((s) => s.trim())
   .filter(Boolean);
 
+// Features Configuration
+export const ENABLE_SUMMARY: boolean = core.getInput("ENABLE_SUMMARY") !== "false"; // Enabled by default
+
+// Review Focus Configuration - what areas to focus on during review
+export const REVIEW_FOCUS: string[] = core
+  .getInput("REVIEW_FOCUS")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+// Default review criteria if none specified
+export const DEFAULT_REVIEW_CRITERIA = [
+  "code_quality",
+  "bugs",
+  "security",
+  "performance",
+  "maintainability",
+  "testability"
+];
+
+// Get the actual criteria to use (default or user-provided)
+export const REVIEW_CRITERIA = REVIEW_FOCUS.length > 0 ? REVIEW_FOCUS : DEFAULT_REVIEW_CRITERIA;
+
 // Retry Configuration
 export const MAX_RETRIES = 3;
 export const RETRY_DELAY = 1000; // 1 second

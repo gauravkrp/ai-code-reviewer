@@ -14,6 +14,7 @@ import {
 	TOKEN_MULTIPLIER,
 	MAX_RETRIES,
 	RETRY_DELAY,
+	REVIEW_CRITERIA,
 } from "../config";
 import { withRetry } from "./retry";
 import { validateAIResponse, getLanguageFromPath } from "../utils";
@@ -50,14 +51,33 @@ export function createPrompt(file: File, chunk: Chunk, prDetails: { title: strin
 
 	// Combine all formatted changes into one string
 	const changesStr = chunk.changes.map(formatChange).join("\n");
+	
+	// Map review criteria to human-readable instructions
+	const criteriaToInstructions: Record<string, string> = {
+		"code_quality": "Code quality and best practices.",
+		"bugs": "Bugs or logical errors.",
+		"security": "Security vulnerabilities.",
+		"performance": "Performance problems.",
+		"maintainability": "Maintainability and readability.",
+		"testability": "Test coverage and testability issues.",
+		"documentation": "Missing or incorrect documentation.",
+		"accessibility": "Accessibility issues.",
+		"compatibility": "Browser or device compatibility concerns.",
+		"dependencies": "Outdated or unnecessary dependencies.",
+		"duplication": "Code duplication or redundancy.",
+		"naming": "Naming conventions and clarity.",
+		"architecture": "Architectural or design issues.",
+		"standards": "Compliance with standards and conventions."
+	};
+	
+	// Generate the focus areas for the review based on configured criteria
+	const focusAreas = REVIEW_CRITERIA
+		.map((criteria, index) => `${index + 1}. ${criteriaToInstructions[criteria] || criteria}`)
+		.join("\n");
 
 	// Define the review instructions as a separate constant for clarity and easier updates
 	const reviewInstructions = `Review the code diff for actionable issues only. Focus on:
-1. Code quality and best practices.
-2. Bugs or logical errors.
-3. Security vulnerabilities.
-4. Performance problems.
-5. Maintainability and readability.
+${focusAreas}
 
 Instructions:
 - Provide specific feedback only if issues are detected; otherwise, return an empty JSON array.
@@ -582,4 +602,89 @@ export function createComment(file: File, chunk: Chunk, aiResponse: AIReviewResp
 		body: formattedComment,
 		side: "RIGHT" as const, // We always comment on the new version
 	};
+}
+
+/**
+ * Generates a comprehensive summary of all review comments for a pull request
+ * @param allComments Array of all generated review comments across files
+ * @param prDetails Pull request details
+ * @returns A formatted markdown summary
+ */
+export async function generateReviewSummary(
+	allComments: ReviewComment[],
+	prDetails: { title: string; description: string }
+): Promise<string> {
+	// Skip if no comments
+	if (allComments.length === 0) {
+		return "No issues found in this pull request.";
+	}
+
+	// Create a summary prompt
+	const fileCommentMap = new Map<string, ReviewComment[]>();
+	
+	// Group comments by file
+	allComments.forEach(comment => {
+		if (!fileCommentMap.has(comment.path)) {
+			fileCommentMap.set(comment.path, []);
+		}
+		fileCommentMap.get(comment.path)?.push(comment);
+	});
+	
+	// Format comment data for the prompt
+	const commentSummaries = [];
+	for (const [file, comments] of fileCommentMap.entries()) {
+		commentSummaries.push(`File: ${file}\nIssues: ${comments.length}\n${comments.map(c => `- Line ${c.line}: ${c.body.split('\n')[0]}`).join('\n')}`);
+	}
+	
+	const prompt = `Generate a concise but insightful summary of the following code review comments for a pull request.
+	
+Title: ${prDetails.title}
+Description: ${prDetails.description}
+
+Review comments by file:
+${commentSummaries.join('\n\n')}
+
+Provide a summary that includes:
+1. A brief overview of the main categories of issues found
+2. The most critical issues that should be addressed
+3. Any patterns or recurring problems
+4. Actionable recommendations for the developer
+
+Format the response as Markdown with appropriate sections and bullet points.`;
+
+	try {
+		let summaryResponse;
+		if (AI_PROVIDER.toLowerCase() === "anthropic") {
+			const response = await anthropic.messages.create({
+				model: ANTHROPIC_API_MODEL,
+				max_tokens: 1000,
+				temperature: 0.2,
+				system: "You are an expert code reviewer summarizing pull request feedback.",
+				messages: [{ role: "user", content: prompt }],
+			});
+			summaryResponse = response.content[0].type === "text" 
+			  ? response.content[0].text 
+			  : "Failed to get text response from Anthropic";
+		} else {
+			const isOModel = OPENAI_API_MODEL.startsWith("o");
+			const response = await openai.chat.completions.create({
+				model: OPENAI_API_MODEL,
+				messages: [
+					{ role: "system", content: "You are an expert code reviewer summarizing pull request feedback." },
+					{ role: "user", content: prompt }
+				],
+				temperature: 0.2,
+				...(isOModel 
+					? { max_completion_tokens: 1000 } 
+					: { max_tokens: 1000 })
+			});
+			summaryResponse = response.choices[0].message.content || "";
+		}
+		
+		return summaryResponse;
+	} catch (error) {
+		core.warning(`Failed to generate review summary: ${error instanceof Error ? error.message : String(error)}`);
+		// Fallback to simple summary
+		return `## Code Review Summary\n\nFound ${allComments.length} issues across ${fileCommentMap.size} files.`;
+	}
 }

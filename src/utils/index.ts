@@ -80,3 +80,23 @@ export function validateAIResponse(response: any): response is AIReviewResponse 
 
 	return true;
 }
+
+/**
+ * Check if a branch is stale based on last commit date
+ * @param lastCommitDate The date of the last commit
+ * @param daysThreshold Number of days after which a branch is considered stale
+ * @returns Object with isStale flag and age in days
+ */
+export function isBranchStale(lastCommitDate: string, daysThreshold: number = 30): { isStale: boolean; ageInDays: number } {
+	const commitDate = new Date(lastCommitDate);
+	const today = new Date();
+	
+	// Calculate the difference in days
+	const diffTime = Math.abs(today.getTime() - commitDate.getTime());
+	const ageInDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+	
+	return {
+		isStale: ageInDays > daysThreshold,
+		ageInDays
+	};
+}
