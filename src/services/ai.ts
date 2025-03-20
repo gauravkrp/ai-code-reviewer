@@ -17,6 +17,7 @@ import {
 } from "../config";
 import { withRetry } from "./retry";
 import { validateAIResponse, getLanguageFromPath } from "../utils";
+import { getCachedReviewResults, cacheReviewResults } from "./cache";
 
 // Initialize AI clients
 const openai = new OpenAI({
@@ -98,32 +99,65 @@ Provide your code review feedback in JSON format with the following structure:
 
 /**
  * Gets AI response for a given prompt using the configured AI provider
+ * With GitHub Actions cache support
  */
 export async function getAIResponse(
 	prompt: string,
 	chunk?: Chunk,
-	prDetails?: { title: string; description: string }
+	prDetails?: { title: string; description: string; owner?: string; repo?: string },
+	file?: File
 ): Promise<AIResponseArray | null> {
 	try {
-		core.debug(`Getting AI response using provider: ${AI_PROVIDER}`);
-
-		if (AI_PROVIDER.toLowerCase() === "anthropic") {
-			return await withRetry(() => getAnthropicResponse(prompt));
-		} else {
-			return await withRetry(() => getOpenAIResponse(prompt, chunk));
+		// Check cache first if we have file and repo info
+		if (file && prDetails && prDetails.owner && prDetails.repo && chunk) {
+			const repoFullName = `${prDetails.owner}/${prDetails.repo}`;
+			const filePath = file.to || file.from || 'unknown';
+			
+			// Create a string representation of the code chunk for caching
+			const codeText = chunk.changes
+				.map(change => `${change.type}|${change.content}`)
+				.join('\n');
+			
+			// Try to get cached response
+			const cachedResponse = await getCachedReviewResults(repoFullName, filePath, codeText);
+			if (cachedResponse) {
+				core.info(`Using cached AI response for ${filePath}`);
+				return cachedResponse;
+			}
 		}
+		
+		// No cache hit, call the AI API
+		core.debug(`Getting AI response using provider: ${AI_PROVIDER}`);
+		
+		let response: AIResponseArray | null;
+		if (AI_PROVIDER.toLowerCase() === "anthropic") {
+			response = await withRetry(() => getAnthropicResponse(prompt));
+		} else {
+			response = await withRetry(() => getOpenAIResponse(prompt, chunk));
+		}
+		
+		// Cache the result if we have file and repo info
+		if (response && file && prDetails && prDetails.owner && prDetails.repo && chunk) {
+			const repoFullName = `${prDetails.owner}/${prDetails.repo}`;
+			const filePath = file.to || file.from || 'unknown';
+			
+			// Create a string representation of the code chunk for caching
+			const codeText = chunk.changes
+				.map(change => `${change.type}|${change.content}`)
+				.join('\n');
+			
+			await cacheReviewResults(repoFullName, filePath, codeText, response);
+		}
+		
+		return response;
 	} catch (error) {
-		core.error(
-			`Error getting AI response after ${MAX_RETRIES} attempts: ${
-				error instanceof Error ? error.message : String(error)
-			}`
-		);
-
+		core.error(`Error getting AI response after ${MAX_RETRIES} attempts: ${error instanceof Error ? error.message : String(error)}`);
+		
 		// Log more detailed error information
 		if (error instanceof Error && error.stack) {
 			core.debug(`Error stack trace: ${error.stack}`);
 		}
-
+		
 		return null;
 	}
 }

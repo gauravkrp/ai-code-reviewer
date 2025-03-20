@@ -1,39 +1,40 @@
 {
-  "name": "open-ai-reviewer",
-  "version": "1.0.0",
-  "description": "Open AI powered code reviews",
-  "main": "lib/main.js",
-  "author": "Ville Saukkonen",
-  "license": "MIT",
-  "scripts": {
-    "build": "tsc",
-    "package": "ncc build --source-map --license licenses.txt",
-    "format": "prettier --write .",
-    "lint": "prettier --check .",
-    "postinstall": "husky",
-    "pre-commit": "npm run build && npm run package",
-    "test:local": "ts-node __tests/test.ts",
-    "test:github": "ts-node __tests/test-github.ts",
-    "test:ai": "ts-node __tests/test-ai.ts",
-    "test:openai": "node scripts/test-openai.js"
-  },
-  "dependencies": {
-    "@actions/core": "^1.10.0",
-    "@anthropic-ai/sdk": "^0.39.0",
-    "@octokit/rest": "^19.0.7",
-    "dotenv": "^16.4.5",
-    "minimatch": "^7.4.2",
-    "openai": "^4.20.1",
-    "parse-diff": "^0.11.1",
-    "ts-node": "^10.9.1"
-  },
-  "devDependencies": {
-    "@jest/globals": "^29.7.0",
-    "@types/jest": "^29.5.12",
-    "@types/node": "^18.15.5",
-    "@vercel/ncc": "^0.36.1",
-    "husky": "^9.0.11",
-    "prettier": "^2.8.6",
-    "typescript": "^5.0.2"
-  }
+	"name": "ai-pr-code-reviewer",
+	"version": "1.0.0",
+	"description": "AI powered code reviews",
+	"main": "lib/main.js",
+	"author": "Gaurav Pandey",
+	"license": "MIT",
+	"scripts": {
+		"build": "tsc",
+		"package": "ncc build --source-map --license licenses.txt",
+		"format": "prettier --write .",
+		"lint": "prettier --check .",
+		"postinstall": "husky",
+		"pre-commit": "npm run build && npm run package",
+		"test:local": "ts-node __tests/test.ts",
+		"test:github": "ts-node __tests/test-github.ts",
+		"test:ai": "ts-node __tests/test-ai.ts",
+		"test:openai": "node scripts/test-openai.js"
+	},
+	"dependencies": {
+		"@actions/cache": "^4.0.3",
+		"@actions/core": "^1.11.1",
+		"@anthropic-ai/sdk": "^0.39.0",
+		"@octokit/rest": "^19.0.7",
+		"dotenv": "^16.4.7",
+		"minimatch": "^10.0.1",
+		"openai": "^4.88.0",
+		"parse-diff": "^0.11.1",
+		"ts-node": "^10.9.2"
+	},
+	"devDependencies": {
+		"@jest/globals": "^29.7.0",
+		"@types/jest": "^29.5.14",
+		"@types/node": "^22.13.10",
+		"@vercel/ncc": "^0.38.3",
+		"husky": "^9.1.7",
+		"prettier": "^3.5.3",
+		"typescript": "^5.8.2"
+	}
 }

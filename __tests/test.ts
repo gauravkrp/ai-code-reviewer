@@ -18,13 +18,13 @@ process.env.ACTIONS_STEP_DEBUG = "true"; // Enable debug logging
 process.env.ACTIONS_RUNNER_DEBUG = "true"; // Enable runner debugging
 
 // Now import other dependencies
-import { readFileSync, writeFileSync } from "fs";
-import * as core from "@actions/core";
-import { Octokit } from "@octokit/rest";
+import { writeFileSync } from "fs";
+// Using dynamic import for Octokit (ESM module)
 import { main } from "../src/main";
 
-// Initialize Octokit with your token
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+// We'll initialize these later with dynamic import
+let Octokit: any;
+let octokit: any;
 
 async function getPRDetails() {
 	try {
@@ -55,6 +55,11 @@ async function getPRDetails() {
 // Main execution
 async function run() {
 	try {
+		// Dynamically import Octokit (ESM module)
+		const { Octokit: OctokitClass } = await import("@octokit/rest");
+		// Initialize Octokit with your token
+		octokit = new OctokitClass({ auth: process.env.GITHUB_TOKEN });
+		
 		console.log("Fetching PR details...");
 		const prDetails = await getPRDetails();
 		console.log("PR details fetched:", {

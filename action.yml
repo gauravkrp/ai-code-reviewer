@@ -26,6 +26,18 @@ inputs:
     description: "Glob patterns to exclude files from the diff analysis"
     required: false
     default: ""
+  CACHE_ENABLED:
+    description: "Whether to use GitHub Actions cache for AI responses and comment history"
+    required: false
+    default: "true"
+  CACHE_KEY_PREFIX:
+    description: "Prefix for cache keys to avoid conflicts with other actions"
+    required: false
+    default: "ai-review-"
+  CACHE_TTL_DAYS:
+    description: "Number of days to keep cached data before expiring"
+    required: false
+    default: "7"
 runs:
   using: "node16"
   main: "dist/index.js"

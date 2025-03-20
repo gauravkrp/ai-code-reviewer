@@ -11,6 +11,7 @@ review process.
 - Filters out files that match specified exclude patterns.
 - Supports both pull requests and direct code pushes to branches.
 - Avoids duplicate comments by tracking existing issues and resolved items.
+- Uses GitHub Actions cache to improve performance and reduce API costs.
 - Easy to set up and integrate into your GitHub workflow.
 
 ## Setup
@@ -51,14 +52,14 @@ jobs:
         uses: freeedcom/ai-codereviewer@main
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AI_PROVIDER: ${{ vars.AI_PROVIDER || 'openai' }}
-          # OpenAI configuration
+          AI_PROVIDER: "openai" # Optional: defaults to "openai"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_MODEL: ${{ vars.OPENAI_API_MODEL || 'gpt-4-1106-preview' }}
-          # Anthropic configuration
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_API_MODEL: ${{ vars.ANTHROPIC_API_MODEL || 'claude-3-7-sonnet-20250219' }}
+          OPENAI_API_MODEL: "gpt-4-1106-preview" # Optional: defaults to "gpt-4"
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
+          # Cache configuration (all optional)
+          CACHE_ENABLED: "true"  # Enable caching (default)
+          CACHE_KEY_PREFIX: "acr-"  # Custom prefix for cache keys
+          CACHE_TTL_DAYS: "7"  # Cache entries expire after 7 days
 ```
 
 ### Using Anthropic
@@ -99,6 +100,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_API_MODEL: "claude-3-7-sonnet-20250219" # Optional: defaults to "claude-3-7-sonnet-20250219"
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
+          # Cache configuration
+          CACHE_ENABLED: "true"
+          CACHE_TTL_DAYS: "14"  # Keep cache for 2 weeks
 ```
 
 ### Using Repository Variables for Flexibility
@@ -133,6 +137,10 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_API_MODEL: ${{ vars.ANTHROPIC_API_MODEL || 'claude-3-7-sonnet-20250219' }}
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
+          # Cache configuration using repository variables
+          CACHE_ENABLED: ${{ vars.CACHE_ENABLED || 'true' }}
+          CACHE_KEY_PREFIX: ${{ vars.CACHE_KEY_PREFIX || 'acr-' }}
+          CACHE_TTL_DAYS: ${{ vars.CACHE_TTL_DAYS || '7' }}
 ```
 
 4. Customize the `exclude` input if you want to ignore certain file patterns from being reviewed.
@@ -162,6 +170,40 @@ To avoid creating redundant feedback, the action implements intelligent comment 
 4. **Proximity awareness**: Considers nearby lines when determining whether a comment would be redundant
 
 This ensures that the review process remains helpful without creating noise from repeated suggestions.
+
+### Caching Support
+
+The action uses GitHub Actions' built-in cache to improve performance and reduce API costs:
+
+1. **AI Response Caching**: 
+   - Caches responses for specific code chunks to avoid repeating identical API calls
+   - Significantly reduces token usage and API costs for similar code patterns
+   - Faster reviews as cached responses are retrieved instantly
+
+2. **Comment History Caching**:
+   - Preserves a history of past comments to enhance duplicate detection
+   - Works across workflow runs to maintain state
+   - Combines with GitHub's API to ensure comprehensive duplicate detection
+
+3. **Analytics Tracking**:
+   - Records common issue types found in the repository
+   - Builds insights about code quality trends over time
+   - Uses configurable TTL to maintain relevant information
+
+You can configure caching with the following options:
+
+```yaml
+- name: AI Code Reviewer
+  uses: freeedcom/ai-codereviewer@main
+  with:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    # Cache configuration
+    CACHE_ENABLED: "true"  # Optional: Enable/disable caching (default: true)
+    CACHE_KEY_PREFIX: "my-repo-"  # Optional: Custom prefix for cache keys (default: ai-review-)
+    CACHE_TTL_DAYS: "14"  # Optional: Days to keep cache entries (default: 7)
+```
+
+Caching is enabled by default but can be disabled by setting `CACHE_ENABLED: "false"` if needed.
 
 ## Contributing
 

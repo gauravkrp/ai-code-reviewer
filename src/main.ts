@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
 import parseDiff, { File, Chunk, Change } from "parse-diff";
-import minimatch from "minimatch";
+import { minimatch } from "minimatch";
 import { ReviewComment, PRDetails } from "./types";
 import {
 	AI_PROVIDER,
@@ -23,6 +23,7 @@ import {
 } from "./services/github";
 import { getAIResponse, createComment, createPrompt } from "./services/ai";
 import { readFileSync } from "fs";
+import { getCommentHistory, storeCommentHistory, trackCommonIssue } from "./services/cache";
 
 // Constants for configuration
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
@@ -302,7 +303,7 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
 
 		// Get AI response
 		core.debug(`Sending chunk ${i + 1} to AI for review`);
-		const aiResponses = await getAIResponse(prompt, chunk, prDetails);
+		const aiResponses = await getAIResponse(prompt, chunk, prDetails, file);
 
 		if (!aiResponses || aiResponses.length === 0) {
 			core.debug(`No AI review comments generated for chunk ${i + 1} in ${filePath}`);
@@ -600,6 +601,20 @@ export async function main() {
 				prDetails.pull_number
 			);
 
+			// Also get historical comments from cache for more comprehensive duplicate detection
+			const repoFullName = `${prDetails.owner}/${prDetails.repo}`;
+			const historicalComments = await getCommentHistory(repoFullName, prDetails.pull_number);
+
+			// Convert historical comments to the format needed for duplicate detection
+			const historicalContentItems = historicalComments.map((comment) => ({
+				path: comment.path,
+				line: comment.line,
+				body: comment.body,
+			}));
+
+			// Combine current and historical comments for duplicate checking
+			const allCommentItems = [...existingCommentContent, ...historicalContentItems];
+
 			// Filter out comments that would be duplicates of existing ones
 			const originalCount = comments.length;
 			const filteredComments = comments.filter((comment) => {
@@ -614,14 +629,14 @@ export async function main() {
 
 				// Then check for semantically similar comments
 				// Filter to only check comments in same file and within reasonable distance
-				const nearbyComments = existingCommentContent.filter(
+				const nearbyComments = allCommentItems.filter(
 					(existing) => existing.path === comment.path && Math.abs(existing.line - comment.line) < 10
 				);
 
 				for (const existing of nearbyComments) {
 					if (isCommentSimilar(comment.body, existing.body)) {
 						core.debug(
-							`Skipping comment at ${comment.path}:${comment.line} - semantically similar to existing comment at line ${existing.line}`
+							`Skipping comment at ${comment.path}:${comment.line} - semantically similar to existing comment`
 						);
 						return false;
 					}
@@ -634,6 +649,15 @@ export async function main() {
 			const skippedCount = originalCount - filteredComments.length;
 			if (skippedCount > 0) {
 				core.info(`Skipped ${skippedCount} comments that would duplicate existing comments`);
+			}
+
+			// Store the new comments in cache for future reference
+			await storeCommentHistory(repoFullName, prDetails.pull_number, filteredComments);
+
+			// Track common issue types for analytics
+			const commentsByType = categorizeComments(filteredComments);
+			for (const [issueType, count] of Object.entries(commentsByType)) {
+				await trackCommonIssue(repoFullName, issueType, count);
 			}
 
 			// If all comments were duplicates, we're done
@@ -697,6 +721,36 @@ export async function main() {
 			core.debug(`Full error object: ${JSON.stringify(error, null, 2)}`);
 		}
 	}
+}
+
+/**
+ * Categorize comments by type for analytics
+ */
+function categorizeComments(comments: ReviewComment[]): Record<string, number> {
+	const categories: Record<string, number> = {};
+
+	for (const comment of comments) {
+		// Extract severity or category if available in the comment body
+		let category = "unknown";
+
+		// Try to extract category from comment body (basic approach)
+		const bodyLower = comment.body.toLowerCase();
+		if (bodyLower.includes("security") || bodyLower.includes("vulnerability")) {
+			category = "security";
+		} else if (bodyLower.includes("performance")) {
+			category = "performance";
+		} else if (bodyLower.includes("bug") || bodyLower.includes("error")) {
+			category = "bug";
+		} else if (bodyLower.includes("style") || bodyLower.includes("formatting")) {
+			category = "style";
+		} else if (bodyLower.includes("refactor")) {
+			category = "refactor";
+		}
+
+		categories[category] = (categories[category] || 0) + 1;
+	}
+
+	return categories;
 }
 
 // Only run the main function if this file is being run directly
