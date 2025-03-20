@@ -32,56 +32,43 @@ const anthropic = new Anthropic({
  * Creates a prompt for the AI based on the file and chunk
  */
 export function createPrompt(file: File, chunk: Chunk, prDetails: { title: string; description: string }): string {
+	// Determine the file path and language based on the provided file object
 	const filePath = file.to || file.from || "unknown";
 	const language = getLanguageFromPath(filePath);
 
-	// Log condensed chunk info rather than full content
+	// Log condensed chunk information for debugging purposes
 	core.debug(
-		`Creating prompt for ${filePath} (${language}): chunk with ${chunk.changes.length} changes, newLines=${chunk.newLines}, oldLines=${chunk.oldLines}`
+		`Creating prompt for ${filePath} (${language}): ${chunk.changes.length} changes, newLines=${chunk.newLines}, oldLines=${chunk.oldLines}`
 	);
 
-	// Create a context-aware prompt
-	const prompt = `Review the following code changes in ${language} file '${filePath}':
-
-${chunk.changes
-	.map((change) => {
-		const lineNumber = "ln" in change ? change.ln : "ln2" in change ? change.ln2 : 0;
+	// Helper function to format each code change
+	const formatChange = (change: any): string => {
+		// Use nullish coalescing to select the appropriate line number
+		const lineNumber = change.ln ?? change.ln2 ?? 0;
 		return `${lineNumber}: ${change.content}`;
-	})
-	.join("\n")} and take the pull request title and description into account when writing the response.
-  
-Pull request title: ${prDetails.title}
-Pull request description:
+	};
 
----
-${prDetails.description}
----
+	// Combine all formatted changes into one string
+	const changesStr = chunk.changes.map(formatChange).join("\n");
 
-Analyze the code for SUBSTANTIVE issues related to:
-1. Code quality and best practices 
-2. Potential bugs or logical errors
-3. Security vulnerabilities
-4. Performance optimizations
-5. Maintainability and readability
+	// Define the review instructions as a separate constant for clarity and easier updates
+	const reviewInstructions = `Review the code diff for actionable issues only. Focus on:
+1. Code quality and best practices.
+2. Bugs or logical errors.
+3. Security vulnerabilities.
+4. Performance problems.
+5. Maintainability and readability.
 
-IMPORTANT: Focus ONLY on specific, actionable issues. DO NOT make generic observations about hardcoded values, presence of identifiers, or configuration entries unless they represent a concrete security risk or bug.
-DO NOT suggest "verifying" or "ensuring" values without specific technical reasons.
-- Do not give positive comments or compliments.
-- Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
-- Write the comment in GitHub Markdown format.
-- Use the given description only for the overall context and only comment the code.
-- IMPORTANT: NEVER suggest adding comments to the code.
-- IMPORTANT: For imports and variable declarations:
-  * Only suggest removing imports if they are newly added in this diff (lines with '+' prefix) and definitely unused
-  * Do not suggest removing existing imports or variables - they might be used elsewhere in the file
-  * Only flag unused variables if they're newly introduced in this diff
-  * Remember you're only seeing a portion of the file in the diff, not the entire file
-- Focus on actual code issues: bugs, performance issues, security concerns, and best practices.
-- Suggest specific fixes rather than just pointing out problems.
-- If suggesting a code change, provide a concrete example of the improved code.
-- IMPORTANT: Remember that you're only seeing a portion of the file and your knowledge of the codebase is limited to what's shown in this diff.
+Instructions:
+- Provide specific feedback only if issues are detected; otherwise, return an empty JSON array.
+- Use GitHub Markdown format and output only JSON inside a code block.
+- Use the PR title and description solely as overall context; review only the provided code diff.
+- Do not comment on hardcoded values, naming, or configuration entries unless they pose a concrete risk.
+- For newly added imports or variables, flag them only if they are unused.
+- Always include a concrete code example when suggesting a fix.
+- Do not suggest adding inline comments to the code.
 
-Provide your code review feedback in JSON format with the following structure:
+Return your review only as a JSON array of objects with the following structure:
 {
   "reviews": [
     {
@@ -94,7 +81,18 @@ Provide your code review feedback in JSON format with the following structure:
   ]
 }`;
 
-	return prompt;
+	// Build and return the complete prompt string using a template literal
+	return `Review the following code changes in ${language} file '${filePath}':
+
+${changesStr}
+
+Pull request title: ${prDetails.title}
+Pull request description:
+---
+${prDetails.description}
+---
+
+${reviewInstructions}`;
 }
 
 /**
@@ -111,13 +109,11 @@ export async function getAIResponse(
 		// Check cache first if we have file and repo info
 		if (file && prDetails && prDetails.owner && prDetails.repo && chunk) {
 			const repoFullName = `${prDetails.owner}/${prDetails.repo}`;
-			const filePath = file.to || file.from || 'unknown';
-			
+			const filePath = file.to || file.from || "unknown";
+
 			// Create a string representation of the code chunk for caching
-			const codeText = chunk.changes
-				.map(change => `${change.type}|${change.content}`)
-				.join('\n');
-			
+			const codeText = chunk.changes.map((change) => `${change.type}|${change.content}`).join("\n");
+
 			// Try to get cached response
 			const cachedResponse = await getCachedReviewResults(repoFullName, filePath, codeText);
 			if (cachedResponse) {
@@ -125,39 +121,39 @@ export async function getAIResponse(
 				return cachedResponse;
 			}
 		}
-		
+
 		// No cache hit, call the AI API
 		core.debug(`Getting AI response using provider: ${AI_PROVIDER}`);
-		
+
 		let response: AIResponseArray | null;
 		if (AI_PROVIDER.toLowerCase() === "anthropic") {
 			response = await withRetry(() => getAnthropicResponse(prompt));
 		} else {
 			response = await withRetry(() => getOpenAIResponse(prompt, chunk));
 		}
-		
+
 		// Cache the result if we have file and repo info
 		if (response && file && prDetails && prDetails.owner && prDetails.repo && chunk) {
 			const repoFullName = `${prDetails.owner}/${prDetails.repo}`;
-			const filePath = file.to || file.from || 'unknown';
-			
+			const filePath = file.to || file.from || "unknown";
+
 			// Create a string representation of the code chunk for caching
-			const codeText = chunk.changes
-				.map(change => `${change.type}|${change.content}`)
-				.join('\n');
-			
+			const codeText = chunk.changes.map((change) => `${change.type}|${change.content}`).join("\n");
+
 			await cacheReviewResults(repoFullName, filePath, codeText, response);
 		}
-		
+
 		return response;
 	} catch (error) {
-		core.error(`Error getting AI response after ${MAX_RETRIES} attempts: ${error instanceof Error ? error.message : String(error)}`);
-		
+		core.error(
+			`Error getting AI response after ${MAX_RETRIES} attempts: ${error instanceof Error ? error.message : String(error)}`
+		);
+
 		// Log more detailed error information
 		if (error instanceof Error && error.stack) {
 			core.debug(`Error stack trace: ${error.stack}`);
 		}
-		
+
 		return null;
 	}
 }
@@ -175,12 +171,12 @@ async function getOpenAIResponse(prompt: string, chunk?: Chunk): Promise<AIRespo
 				model: OPENAI_API_MODEL,
 				max_completion_tokens: DEFAULT_MAX_TOKENS * 2, // Double the token limit to ensure complete responses
 				response_format: { type: "json_object" as const }, // Using const assertion for type safety
-		  }
+			}
 		: {
 				model: OPENAI_API_MODEL,
 				temperature: 0.2,
 				max_tokens: DEFAULT_MAX_TOKENS * 2, // Double the token limit to ensure complete responses
-		  };
+			};
 
 	// Adjust tokens based on chunk size
 	let maxTokens = DEFAULT_MAX_TOKENS;

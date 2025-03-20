@@ -6,11 +6,11 @@
     "title": "THERA-3769/thera-wallet-fe",
     "body": "",
     "base": {
-      "sha": "be442e4c0e52c090c99407dde298f0c6109d2e97",
+      "sha": "91fdc1fd7d16ae2948a705ce2d4c08f474a11916",
       "ref": "staging"
     },
     "head": {
-      "sha": "edd155a44c4ff5577cb66411cf3bfa7951c9d942",
+      "sha": "715da94fcb7dc6cfba016645ba9e745a5378c9ed",
       "ref": "THERA-3769/thera-wallet-fe"
     }
   },
