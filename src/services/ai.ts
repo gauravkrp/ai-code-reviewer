@@ -29,6 +29,38 @@ const anthropic = new Anthropic({
 	apiKey: ANTHROPIC_API_KEY,
 });
 
+// Add these constants at the top of the file after imports
+const SYSTEM_PROMPT = `You are a code review assistant that provides feedback in JSON format. Focus ONLY on substantive issues like bugs, security vulnerabilities, and performance problems. DO NOT make generic observations about hardcoded values or suggest 'verifying' configuration values without specific technical reasons.
+
+Instructions:
+- Provide specific and concise feedback ONLY IF ISSUES ARE DETECTED; otherwise, return an empty JSON array.
+- Return your response as a pure JSON object, not wrapped in markdown code blocks.
+- Do not comment on hardcoded values, naming, or configuration entries unless they pose a concrete risk.
+- Check newly added imports or variables only if they are unused in the diff.
+- Always include a concrete code example when suggesting a fix.
+- Do not suggest adding inline comments to the code.
+- For each issue found, provide a concrete code suggestion with a complete fix when possible.
+- Keep review comments brief and focused on the specific issue.
+- Avoid explaining obvious code patterns or standard practices.
+- Focus on critical issues that need immediate attention.
+- Use clear, direct language without unnecessary context or explanations.
+
+Return your review as a JSON object with the following structure:
+{
+  "reviews": [
+    {
+      "lineNumber": <line number as integer>,
+      "reviewComment": "<your specific, actionable feedback for this line>",
+      "severity": "<one of: error, warning, info>",
+      "filePath": "<file path>",
+      "suggestion": {
+        "code": "<suggested code that fixes the issue>",
+        "description": "<brief description of what the fix does>"
+      }
+    }
+  ]
+}`;
+
 /**
  * Creates a prompt for the AI based on the file and chunk
  */
@@ -75,39 +107,6 @@ export function createPrompt(file: File, chunk: Chunk, prDetails: { title: strin
 		.map((criteria, index) => `${index + 1}. ${criteriaToInstructions[criteria] || criteria}`)
 		.join("\n");
 
-	// Define the review instructions as a separate constant for clarity and easier updates
-	const reviewInstructions = `Review the code diff for actionable issues only. Focus on:
-${focusAreas}
-
-Instructions:
-- Provide specific feedback only if issues are detected; otherwise, return an empty JSON array.
-- Return your response as a pure JSON object, not wrapped in markdown code blocks.
-- Use the PR title and description solely as overall context; review only the provided code diff.
-- Do not comment on hardcoded values, naming, or configuration entries unless they pose a concrete risk.
-- For newly added imports or variables, flag them only if they are unused.
-- Always include a concrete code example when suggesting a fix.
-- Do not suggest adding inline comments to the code.
-- For each issue found, provide a concrete code suggestion with a complete fix when possible.
-
-Return your review as a JSON object with the following structure:
-{
-  "reviews": [
-    {
-      "lineNumber": <line number as integer>,
-      "reviewComment": "<your specific, actionable feedback for this line>",
-      "severity": "<one of: error, warning, info>",
-      "filePath": "${filePath}",
-      "suggestion": {
-        "code": "<suggested code that fixes the issue>",
-        "description": "<brief description of what the fix does>"
-      }
-    },
-    ...
-  ]
-}
-
-The "suggestion" field is optional but should be included whenever you can provide a specific fix.`;
-
 	// Build and return the complete prompt string using a template literal
 	return `Review the following code changes in ${language} file '${filePath}':
 
@@ -119,7 +118,10 @@ Pull request description:
 ${prDetails.description}
 ---
 
-${reviewInstructions}`;
+Focus areas for review:
+${focusAreas}
+
+The "suggestion" field is optional but should be included whenever you can provide a code fix.`;
 }
 
 /**
@@ -239,8 +241,7 @@ async function getOpenAIResponse(prompt: string, chunk?: Chunk): Promise<AIRespo
 					messages: [
 						{
 							role: "system",
-							content:
-								"You are a code review assistant. Your job is to analyze code changes and provide specific, actionable feedback. Focus ONLY on substantive issues like bugs, security vulnerabilities, and performance problems. DO NOT make generic observations about hardcoded values or suggest 'verifying' configuration values without specific technical reasons.",
+							content: SYSTEM_PROMPT,
 						},
 						{
 							role: "user",
@@ -442,8 +443,7 @@ async function getAnthropicResponse(prompt: string): Promise<AIResponseArray | n
 					model: ANTHROPIC_API_MODEL,
 					max_tokens: maxTokens,
 					temperature: 0.2,
-					system:
-						"You are a code review assistant that provides feedback in JSON format. Focus ONLY on substantive issues like bugs, security vulnerabilities, and performance problems. DO NOT make generic observations about hardcoded values or suggest 'verifying' configuration values without specific technical reasons. Always format your response as a valid JSON object with a 'reviews' array.",
+					system: SYSTEM_PROMPT,
 					messages: [
 						{
 							role: "user",
