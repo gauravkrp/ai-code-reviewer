@@ -40,6 +40,20 @@ function generateHistoryCacheKey(repoFullName: string, prNumber: number): string
 }
 
 /**
+ * Ensures the cache directory exists
+ */
+function ensureCacheDir(): void {
+  if (!fs.existsSync(TEMP_CACHE_DIR)) {
+    try {
+      fs.mkdirSync(TEMP_CACHE_DIR, { recursive: true });
+      core.debug(`Created cache directory at ${TEMP_CACHE_DIR}`);
+    } catch (error) {
+      core.warning(`Failed to create cache directory: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
+/**
  * Cache AI review results
  */
 export async function cacheReviewResults(
@@ -51,6 +65,7 @@ export async function cacheReviewResults(
   if (!CACHE_ENABLED) return false;
 
   try {
+    ensureCacheDir();
     const cacheKey = generateReviewCacheKey(repoFullName, filePath, codeContent);
     const cachePath = path.join(TEMP_CACHE_DIR, `${cacheKey}.json`);
     
@@ -87,6 +102,7 @@ export async function getCachedReviewResults(
   if (!CACHE_ENABLED) return null;
 
   try {
+    ensureCacheDir();
     const cacheKey = generateReviewCacheKey(repoFullName, filePath, codeContent);
     const cachePath = path.join(TEMP_CACHE_DIR, `${cacheKey}.json`);
     
@@ -130,6 +146,7 @@ export async function storeCommentHistory(
   if (!CACHE_ENABLED) return false;
 
   try {
+    ensureCacheDir();
     const cacheKey = generateHistoryCacheKey(repoFullName, prNumber);
     const cachePath = path.join(TEMP_CACHE_DIR, `${cacheKey}.json`);
     
@@ -188,6 +205,7 @@ export async function getCommentHistory(
   if (!CACHE_ENABLED) return [];
 
   try {
+    ensureCacheDir();
     const cacheKey = generateHistoryCacheKey(repoFullName, prNumber);
     const cachePath = path.join(TEMP_CACHE_DIR, `${cacheKey}.json`);
     
@@ -231,6 +249,7 @@ export async function trackCommonIssue(
   if (!CACHE_ENABLED) return;
 
   try {
+    ensureCacheDir();
     const cacheKey = `${CACHE_KEY_PREFIX}issues-${repoFullName}`;
     const cachePath = path.join(TEMP_CACHE_DIR, `${cacheKey}.json`);
     
@@ -272,6 +291,7 @@ export async function getCommonIssues(
   if (!CACHE_ENABLED) return {};
 
   try {
+    ensureCacheDir();
     const cacheKey = `${CACHE_KEY_PREFIX}issues-${repoFullName}`;
     const cachePath = path.join(TEMP_CACHE_DIR, `${cacheKey}.json`);
     
