@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
-import parseDiff, { File, Chunk, Change } from "parse-diff";
+import parseDiff, { File, Chunk, Change, AddChange } from "parse-diff";
 import { minimatch } from "minimatch";
-import { ReviewComment, PRDetails } from "./types";
+import { ReviewComment, PRDetails, AIReviewResponse } from "./types";
 import {
 	AI_PROVIDER,
 	MAX_FILES,
@@ -15,7 +15,8 @@ import {
 	ENABLE_SUMMARY,
 	ENABLE_AUTO_FIX,
 	SUGGESTION_STRATEGY,
-	ENABLE_AUTO_PR
+	ENABLE_AUTO_PR,
+	getModelConfig
 } from "./config";
 import { isFileTooLarge, isChunkTooLarge } from "./utils";
 import {
@@ -31,6 +32,7 @@ import { getCommentHistory, storeCommentHistory, trackCommonIssue } from "./serv
 import { tryAutomaticFix } from "./utils/auto-fix";
 import { createFixPR } from "./services/auto-pr";
 import { Octokit } from "@octokit/rest";
+import { prepareBatchedReviewRequests, createBatchedPrompt } from "./services/batch";
 
 // Constants for configuration
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
@@ -325,7 +327,7 @@ async function processFile(file: File, prDetails: PRDetails): Promise<ReviewComm
 			core.debug(`AI response preview: ${JSON.stringify(aiResponses.slice(0, 1))}`);
 
 			// Check for potentially problematic line numbers ahead of time
-			const invalidLineNums = aiResponses.filter((r) => {
+			const invalidLineNums = aiResponses.filter((r: AIReviewResponse) => {
 				const lineNumber = Number(r.lineNumber);
 				return isNaN(lineNumber) || lineNumber < chunk.newStart || lineNumber > chunk.newStart + chunk.newLines - 1;
 			});
@@ -391,74 +393,128 @@ async function analyzeCode(parsedDiff: File[], prDetails: PRDetails): Promise<Re
 		);
 	}
 
-	// Track analysis stats
-	let processedFiles = 0;
-	let skippedFiles = 0;
-	let erroredFiles = 0;
-	const startTime = Date.now();
+	// Get model configuration based on provider and model
+	const modelConfig = getModelConfig(AI_PROVIDER, AI_PROVIDER.toLowerCase() === "anthropic" ? ANTHROPIC_API_MODEL : OPENAI_API_MODEL);
+	core.info(`Using model configuration:
+- Provider: ${AI_PROVIDER}
+- Model: ${AI_PROVIDER.toLowerCase() === "anthropic" ? ANTHROPIC_API_MODEL : OPENAI_API_MODEL}
+- Max Tokens: ${modelConfig.maxTokens}
+- Context Window: ${modelConfig.contextWindow}
+- Token Multiplier: ${modelConfig.tokenMultiplier}`);
 
-	// Process files in parallel with a concurrency limit
-	const CONCURRENT_FILES = 3;
-	core.info(`Processing files with concurrency level: ${CONCURRENT_FILES}`);
-
-	for (let i = 0; i < filesToAnalyze.length; i += CONCURRENT_FILES) {
-		const batchNumber = Math.floor(i / CONCURRENT_FILES) + 1;
-		const batchSize = Math.min(CONCURRENT_FILES, filesToAnalyze.length - i);
-		const fileBatch = filesToAnalyze.slice(i, i + CONCURRENT_FILES);
-
-		core.info(
-			`Processing batch ${batchNumber} with ${batchSize} files (${i + 1}-${i + batchSize} of ${filesToAnalyze.length})`
+	try {
+		// Prepare batched requests
+		const batches = await prepareBatchedReviewRequests(
+			filesToAnalyze,
+			prDetails,
+			modelConfig.maxTokens,
+			octokit,
+			prDetails.owner,
+			prDetails.repo
 		);
 
-		const fileCommentsPromises = fileBatch.map(async (file) => {
-			const filePath = file.to || file.from || "unknown";
+		core.info(`Processing ${batches.length} batches...`);
 
-			if (file.to === "/dev/null") {
-				core.debug(`Skipping deleted file: ${file.from}`);
-				skippedFiles++;
-				return [];
+		// Process each batch
+		for (let i = 0; i < batches.length; i++) {
+			const batch = batches[i];
+			core.info(`Processing batch ${i + 1}/${batches.length} with ${batch.files.length} files`);
+
+			// Create prompt for the batch
+			const prompt = createBatchedPrompt(batch);
+
+			// Get AI response for the entire batch
+			const aiResponses = await getAIResponse(prompt, undefined, prDetails);
+
+			if (!aiResponses || aiResponses.length === 0) {
+				core.debug(`No AI review comments generated for batch ${i + 1}`);
+				continue;
 			}
 
-			// Skip files that are too large
-			if (isFileTooLarge(file)) {
-				skippedFiles++;
-				return [];
+			core.info(`Received ${aiResponses.length} comments from AI for batch ${i + 1}`);
+
+			// Process each AI response and create comments
+			for (const response of aiResponses) {
+				// Find the corresponding file and chunk
+				const file = batch.files.find((f: { path: string; chunks: { lineRange: { start: number; end: number } }[] }) => 
+					f.chunks.some((chunk: { lineRange: { start: number; end: number } }) => 
+						response.lineNumber >= chunk.lineRange.start && 
+						response.lineNumber <= chunk.lineRange.end
+					)
+				);
+
+				if (!file) {
+					core.warning(`Could not find file for line ${response.lineNumber}`);
+					continue;
+				}
+
+				const chunk = file.chunks.find((chunk: { lineRange: { start: number; end: number } }) => 
+					response.lineNumber >= chunk.lineRange.start && 
+					response.lineNumber <= chunk.lineRange.end
+				);
+
+				if (!chunk) {
+					core.warning(`Could not find chunk for line ${response.lineNumber}`);
+					continue;
+				}
+
+				// Create a File object for the comment
+				const fileObj: File = {
+					to: file.path,
+					chunks: [{
+						newStart: chunk.lineRange.start,
+						newLines: chunk.lineRange.end - chunk.lineRange.start + 1,
+						oldLines: 0,
+						oldStart: 0,
+						content: chunk.changes,
+						changes: chunk.changes.split('\n').map((line: string, index: number) => ({
+							type: 'add',
+							add: true,
+							ln: chunk.lineRange.start + index,
+							content: line
+						} as AddChange))
+					}],
+					deletions: 0,
+					additions: chunk.lineRange.end - chunk.lineRange.start + 1
+				};
+
+				// Apply suggestion strategy
+				let processedResponse = response;
+				
+				if (SUGGESTION_STRATEGY === "ai-only") {
+					// Use only AI suggestions, no auto-fix
+					// processedResponse = response (unchanged)
+				} else if (SUGGESTION_STRATEGY === "auto-fix-first" && ENABLE_AUTO_FIX) {
+					// Try auto-fix first, fallback to AI suggestion
+					processedResponse = tryAutomaticFix(fileObj, fileObj.chunks[0], response);
+				} else if (SUGGESTION_STRATEGY === "ai-first" && ENABLE_AUTO_FIX) {
+					// Use AI suggestion if present, otherwise try auto-fix
+					if (!response.suggestion || !response.suggestion.code) {
+						processedResponse = tryAutomaticFix(fileObj, fileObj.chunks[0], response);
+					}
+				}
+
+				const comment = createComment(fileObj, fileObj.chunks[0], processedResponse);
+
+				if (comment !== null) {
+					core.debug(`Added comment at line ${comment.line} in ${comment.path}`);
+					comments.push(comment);
+				} else {
+					core.error(`Failed to create comment for line ${processedResponse.lineNumber} in ${file.path}`);
+					core.debug(`Response that failed: ${JSON.stringify(processedResponse)}`);
+				}
 			}
-
-			try {
-				core.info(`\nAnalyzing file: ${filePath}`);
-				core.info(`Changes: +${file.additions} -${file.deletions} lines`);
-
-				// Use the processFile function to handle each file
-				return await processFile(file, prDetails);
-			} catch (error) {
-				// Log the error but continue processing other files
-				erroredFiles++;
-				core.warning(`Error processing file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
-				return [];
-			}
-		});
-
-		try {
-			const fileComments = await Promise.all(fileCommentsPromises);
-			const batchComments = fileComments.flat();
-			core.info(`Batch ${batchNumber} complete: Generated ${batchComments.length} comments`);
-			comments.push(...batchComments);
-		} catch (error) {
-			core.warning(
-				`Error processing file batch ${batchNumber}: ${error instanceof Error ? error.message : String(error)}`
-			);
 		}
+
+		core.info(`Generated ${comments.length} comments across ${batches.length} batches`);
+		return comments;
+	} catch (error) {
+		core.error(`Error in analyzeCode: ${error instanceof Error ? error.message : String(error)}`);
+		if (error instanceof Error && error.stack) {
+			core.debug(`Error stack trace: ${error.stack}`);
+		}
+		return [];
 	}
-
-	const duration = (Date.now() - startTime) / 1000;
-	core.info(`\nAnalysis complete in ${duration.toFixed(2)} seconds:`);
-	core.info(`- Processed files: ${processedFiles}`);
-	core.info(`- Skipped files: ${skippedFiles}`);
-	core.info(`- Errored files: ${erroredFiles}`);
-	core.info(`- Generated comments: ${comments.length}`);
-
-	return comments;
 }
 
 /**

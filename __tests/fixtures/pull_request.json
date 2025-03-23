@@ -1,17 +1,17 @@
 {
   "action": "opened",
-  "number": 1992,
+  "number": 2022,
   "pull_request": {
-    "number": 1992,
-    "title": "Thera 3893 | Pay Type Column",
+    "number": 2022,
+    "title": "Date picker improvement",
     "body": "",
     "base": {
-      "sha": "61e537c62b72b43c48f2321e0618d33d2120e779",
+      "sha": "b4ca4ef9597f425a681b1f83764e1518e7cf8ffe",
       "ref": "staging"
     },
     "head": {
-      "sha": "401b5a62f2b4bd72ae496009ce4affca2211bcbf",
-      "ref": "THERA-3893"
+      "sha": "f0e96c9eda8642afa9c2d9d12af1df016992af32",
+      "ref": "date-picker-improvement"
     }
   },
   "repository": {

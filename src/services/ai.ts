@@ -15,6 +15,7 @@ import {
 	MAX_RETRIES,
 	RETRY_DELAY,
 	REVIEW_CRITERIA,
+	getModelConfig
 } from "../config";
 import { withRetry } from "./retry";
 import { validateAIResponse, getLanguageFromPath } from "../utils";
@@ -193,26 +194,27 @@ export async function getAIResponse(
 async function getOpenAIResponse(prompt: string, chunk?: Chunk): Promise<AIResponseArray | null> {
 	// Check if using o3 model family and adjust parameters accordingly
 	const isOModel = OPENAI_API_MODEL.startsWith("o");
+	const modelConfig = getModelConfig(AI_PROVIDER, OPENAI_API_MODEL);
 
 	// Base configuration for the API request - different for o3 and other models
 	const baseConfig = isOModel
 		? {
 				model: OPENAI_API_MODEL,
-				max_completion_tokens: DEFAULT_MAX_TOKENS * 2, // Double the token limit to ensure complete responses
+				max_completion_tokens: modelConfig.maxTokens * 2, // Double the token limit to ensure complete responses
 				response_format: { type: "json_object" as const }, // Using const assertion for type safety
 			}
 		: {
 				model: OPENAI_API_MODEL,
 				temperature: 0.2,
-				max_tokens: DEFAULT_MAX_TOKENS * 2, // Double the token limit to ensure complete responses
+				max_tokens: modelConfig.maxTokens * 2, // Double the token limit to ensure complete responses
 			};
 
 	// Adjust tokens based on chunk size
-	let maxTokens = DEFAULT_MAX_TOKENS;
+	let maxTokens = modelConfig.maxTokens;
 	if (chunk) {
 		const totalLines = chunk.newLines + chunk.oldLines;
 		if (totalLines > MAX_CHUNK_SIZE_FOR_DEFAULT_TOKENS) {
-			maxTokens = DEFAULT_MAX_TOKENS * TOKEN_MULTIPLIER;
+			maxTokens = modelConfig.maxTokens * TOKEN_MULTIPLIER;
 		}
 	}
 
@@ -425,23 +427,16 @@ async function getAnthropicResponse(prompt: string): Promise<AIResponseArray | n
 	try {
 		core.debug(`Sending request to Anthropic API with model: ${ANTHROPIC_API_MODEL}`);
 
-		// Adjust max tokens based on model
-		let maxTokens = 1024;
-		if (ANTHROPIC_API_MODEL.includes("haiku")) {
-			maxTokens = 800;
-		} else if (ANTHROPIC_API_MODEL.includes("sonnet")) {
-			maxTokens = 4096;
-		} else if (ANTHROPIC_API_MODEL.includes("opus")) {
-			maxTokens = 8192;
-		}
+		// Get model configuration
+		const modelConfig = getModelConfig(AI_PROVIDER, ANTHROPIC_API_MODEL);
 
-		core.debug(`Using max_tokens: ${maxTokens} for Anthropic model: ${ANTHROPIC_API_MODEL}`);
+		core.debug(`Using max_tokens: ${modelConfig.maxTokens} for Anthropic model: ${ANTHROPIC_API_MODEL}`);
 
 		const response = await withRetry(
 			() =>
 				anthropic.messages.create({
 					model: ANTHROPIC_API_MODEL,
-					max_tokens: maxTokens,
+					max_tokens: modelConfig.maxTokens,
 					temperature: 0.2,
 					system: SYSTEM_PROMPT,
 					messages: [

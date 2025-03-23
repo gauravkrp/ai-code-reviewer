@@ -1,5 +1,44 @@
 import * as core from "@actions/core";
 
+// Model-specific configurations
+export interface ModelConfig {
+  maxTokens: number;
+  contextWindow: number;
+  tokenMultiplier: number;
+}
+
+export const MODEL_CONFIGS: Record<string, ModelConfig> = {
+  // OpenAI models
+  'gpt-4': { maxTokens: 4096, contextWindow: 8192, tokenMultiplier: 1 },
+  'gpt-4-turbo': { maxTokens: 4096, contextWindow: 128000, tokenMultiplier: 1 },
+  'gpt-3.5-turbo': { maxTokens: 4096, contextWindow: 16385, tokenMultiplier: 1 },
+  'o3-mini': { maxTokens: 4096, contextWindow: 128000, tokenMultiplier: 1 },
+  
+  // Anthropic models
+  'claude-3-opus': { maxTokens: 8192, contextWindow: 200000, tokenMultiplier: 1 },
+  'claude-3-sonnet': { maxTokens: 8192, contextWindow: 200000, tokenMultiplier: 1 },
+  'claude-3-haiku': { maxTokens: 8192, contextWindow: 200000, tokenMultiplier: 1 },
+  'claude-2.1': { maxTokens: 8192, contextWindow: 200000, tokenMultiplier: 1 },
+  'claude-2': { maxTokens: 8192, contextWindow: 100000, tokenMultiplier: 1 },
+  'claude-3-7-sonnet-20250219': { maxTokens: 8192, contextWindow: 200000, tokenMultiplier: 1 },
+  
+  // Default fallback
+  'default': { maxTokens: 4096, contextWindow: 8192, tokenMultiplier: 1 }
+};
+
+// Get model config based on provider and model name
+export function getModelConfig(provider: string, model: string): ModelConfig {
+  const modelKey = model.toLowerCase();
+  const config = MODEL_CONFIGS[modelKey];
+  
+  if (!config) {
+    core.warning(`No specific config found for model ${model}, using default configuration`);
+    return MODEL_CONFIGS.default;
+  }
+  
+  return config;
+}
+
 // AI Provider Configuration
 export const AI_PROVIDER: string = core.getInput("AI_PROVIDER") || "openai";
 export const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");

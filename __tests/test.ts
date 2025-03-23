@@ -31,7 +31,7 @@ async function getPRDetails() {
 		const { data: pr } = await octokit.pulls.get({
 			owner: "CarbonNYC",
 			repo: "thera-fe",
-			pull_number: 1992,
+			pull_number: 2022,
 		});
 
 		return {
@@ -70,9 +70,9 @@ async function run() {
 		// Set up environment for the actual PR
 		const PR_EVENT = {
 			action: "opened",
-			number: 1992,
+			number: 2022,
 			pull_request: {
-				number: 1992,
+				number: 2022,
 				title: prDetails.title,
 				body: prDetails.body,
 				base: prDetails.base,
@@ -105,7 +105,7 @@ async function run() {
 		console.log("- MAX_FILES:", process.env.INPUT_MAX_FILES);
 
 		// Run the main function with actual API calls
-		console.log("\nStarting review of PR #1992...");
+		console.log("\nStarting review of PR #2022...");
 		await main();
 		console.log("Review completed successfully");
 	} catch (error) {
