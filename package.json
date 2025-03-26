@@ -1,10 +1,31 @@
 {
-	"name": "ai-pr-code-reviewer",
-	"version": "1.0.0",
-	"description": "AI powered code reviews",
+	"name": "ai-code-reviewer",
+	"version": "1.1.0",
+	"description": "AI powered PR and code reviews",
 	"main": "lib/main.js",
-	"author": "Gaurav Pandey",
+	"author": {
+		"name": "Gaurav Pandey",
+		"url": "https://github.com/gauravkrp"
+	},
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/gauravkrp/ai-code-reviewer"
+	},
+	"homepage": "https://github.com/gauravkrp/ai-code-reviewer#readme",
+	"bugs": {
+		"url": "https://github.com/gauravkrp/ai-code-reviewer/issues"
+	},
+	"keywords": [
+		"ai",
+		"code-review",
+		"github-actions",
+		"pr-review",
+		"automation",
+		"openai",
+		"anthropic",
+		"claude"
+	],
 	"scripts": {
 		"build": "tsc",
 		"package": "ncc build --source-map --license licenses.txt",
@@ -15,7 +36,8 @@
 		"test:local": "ts-node __tests/test.ts",
 		"test:github": "ts-node __tests/test-github.ts",
 		"test:ai": "ts-node __tests/test-ai.ts",
-		"test:openai": "node scripts/test-openai.js"
+		"test:openai": "node scripts/test-openai.js",
+		"clean": "rimraf dist lib"
 	},
 	"dependencies": {
 		"@actions/cache": "^4.0.3",
