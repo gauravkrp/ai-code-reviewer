@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: AI Code Reviewer
-        uses: freeedcom/ai-codereviewer@main
+        uses: gauravkrp/ai-code-reviewer@main
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AI_PROVIDER: "openai" # Optional: defaults to "openai"
@@ -105,7 +105,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: AI Code Reviewer
-        uses: freeedcom/ai-codereviewer@main
+        uses: gauravkrp/ai-code-reviewer@main
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AI_PROVIDER: "anthropic"
@@ -144,7 +144,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: AI Code Reviewer
-        uses: freeedcom/ai-codereviewer@main
+        uses: gauravkrp/ai-code-reviewer@main
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AI_PROVIDER: ${{ vars.AI_PROVIDER || 'openai' }}
@@ -301,7 +301,7 @@ You can configure caching with the following options:
 
 ```yaml
 - name: AI Code Reviewer
-  uses: freeedcom/ai-codereviewer@main
+  uses: gauravkrp/ai-code-reviewer@main
   with:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     # Cache configuration
